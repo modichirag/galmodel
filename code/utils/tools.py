@@ -222,3 +222,54 @@ def power(f1, f2=None, boxsize=1.0, k = None):
     center= edges[1:] + edges[:-1]
     
     return 0.5 * center, H *boxsize**3 / N
+
+
+#################################################################################
+
+def readperiodic(ar, coords):
+    '''
+    '''
+    def roll(ar, l1, l2, l0, axis):
+        if l1<0 and l2>l0: 
+            print('Inconsistency along axis %d'%axis)
+            return None
+        if l1<0: 
+            ar=np.roll(ar, -l1, axis=axis)
+            l1, l2 = 0, l2-l1
+        elif l2>l0: 
+            ar=np.roll(ar, l0-l2, axis=axis)
+            l1, l2 = l1+l0-l2, l0
+        return ar, l1, l2,
+
+    if len(ar.shape) != len(coords): 
+        print('dimensions inconsistent')
+        return None
+    ndim = len(coords)
+    newcoords = []
+    for i in range(ndim):
+        ar, l1, l2 = roll(ar, coords[i][0], coords[i][1], ar.shape[i], i)
+        newcoords.append([l1, l2])
+    sl = []
+    for i in range(ndim):
+        sl.append(slice(*newcoords[i]))
+    return ar[tuple(sl)]
+
+
+
+def cubify(arr, newshape):
+    oldshape = np.array(arr.shape)
+    repeats = (oldshape / newshape).astype(int)
+    tmpshape = np.column_stack([repeats, newshape]).ravel()
+    order = np.arange(len(tmpshape))
+    order = np.concatenate([order[::2], order[1::2]])
+    # newshape must divide oldshape evenly or else ValueError will be raised
+    return arr.reshape(tmpshape).transpose(order).reshape(-1, *newshape)
+
+def uncubify(arr, oldshape):
+    N, newshape = arr.shape[0], arr.shape[1:]
+    oldshape = np.array(oldshape)    
+    repeats = (oldshape / newshape).astype(int)
+    tmpshape = np.concatenate([repeats, newshape])
+    order = np.arange(len(tmpshape)).reshape(2, -1).ravel(order='F')
+    return arr.reshape(tmpshape).transpose(order).reshape(oldshape)
+

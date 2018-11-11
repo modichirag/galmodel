@@ -21,6 +21,7 @@ set_random_seed(seed_in)
 
 bs = 400
 nc, ncf = 128, 512
+ncp = 256
 step, stepf = 5, 40
 path = './../data/z00/'
 ftype = 'L%04d_N%04d_S%04d_%02dstep/'
@@ -29,41 +30,42 @@ num = int(numd*bs**3)
 seed= 100
 R1 = 3
 R2 = 3*1.2
-kny = np.pi*nc/bs
-kk = tools.fftk((nc, nc, nc), bs)
+kny = np.pi*ncp/bs
+kk = tools.fftk((ncp, ncp, ncp), bs)
 
-
+suff = '2ftmdg256'
 #############################
-
-mesh = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/d/')
+##Read data and generate meshes
+#mesh = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/d/')
+partp = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'dynamic/1/Position/')
+mesh = tools.paintcic(partp, bs, ncp)
 meshdecic = tools.decic(mesh, kk, kny)
 meshR1 = tools.fingauss(mesh, kk, R1, kny)
 meshR2 = tools.fingauss(mesh, kk, R2, kny)
 meshdg = meshR1 - meshR2
-ftlist = [meshdecic.copy(), meshR1.copy(), meshdg.copy()]
+#ftlist = [meshdecic.copy(), meshR1.copy(), meshdg.copy()]
 
 
 hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]
 hposd = hposall[:num].copy()
-hposall = hposall[:2*num]
+#hposall = hposall[:2*num]
 
 # hpmeshall = tools.paintcic(hposall, bs, nc)
 # hpmeshd = tools.paintcic(hposd, bs, nc)
-# clsgrid = hpmeshd.copy()
-hpmeshall = tools.paintnn(hposall, bs, nc)
-hpmeshd = tools.paintnn(hposd, bs, nc)
-clsgrid = hpmeshd.copy()
+
+#hpmeshall = tools.paintnn(hposall, bs, ncp)
+hpmeshd = tools.paintnn(hposd, bs, ncp)
 
 print('All the mesh have been generated')
-
-dind = dtools.balancepts(mesh, blim=1e-2, hfinegrid=hpmeshall, hlim=0.01)
-print(dind.shape, dind.shape[0]/nc**3)
-
 #############################
 
-num_cubes=1000
+#Create training voxels
+num_cubes=2000
 cube_size = 32
-max_offset = 128 - cube_size
+max_offset = ncp - cube_size
+ftlist = [mesh.copy(), meshdg.copy()]
+ftname = ['density', 'GD']
+nchannels = len(ftlist)
 cube_features = []
 cube_target = []
 
@@ -73,37 +75,36 @@ for it in range(num_cubes):
     offset_x = round(rand()*max_offset)
     offset_y = round(rand()*max_offset)
     offset_z = round(rand()*max_offset)
-    
-#     cube_features.append( clip(log10(mesh[offset_x:offset_x+cube_size,
-#                                           offset_y:offset_y+cube_size,
-#                                           offset_z:offset_z+cube_size] + 0.1),0,None))
-    
-    cube_features.append( 1.0*(mesh[offset_x:offset_x+cube_size,
-                                          offset_y:offset_y+cube_size,
-                                          offset_z:offset_z+cube_size]))
-
-    cube_target.append(1.0*(hpmeshd[offset_x:offset_x+cube_size,
-                                          offset_y:offset_y+cube_size,
-                                          offset_z:offset_z+cube_size] ))
+    x1, x2 = offset_x, offset_x+cube_size
+    y1, y2 = offset_y, offset_y+cube_size
+    z1, z2 = offset_z, offset_z+cube_size
+        
+    features = []
+    for i in range(nchannels): features.append(ftlist[i][x1:x2, y1:y2, z1:z2])
+    features = np.stack(features, axis=-1)
+    cube_features.append(features)
+    cube_target.append((hpmeshd[x1:x2, y1:y2, z1:z2]))
     
 
 cube_target = np.stack(cube_target,axis=0).reshape((-1,cube_size,cube_size,cube_size,1))
 print(cube_target.sum(), cube_target.size, hpmeshd.sum())
-cube_features = np.stack(cube_features,axis=0).reshape((-1,cube_size,cube_size,cube_size,1))
+print(len(cube_features))
+print(cube_features[0].shape)
+cube_features = np.stack(cube_features,axis=0).reshape((-1,cube_size,cube_size,cube_size,nchannels))
+
+
+#Save a snapshot of features
+fig, ax = plt.subplots(1, nchannels+1, figsize = (nchannels*4+4, 5))
+n = 10
+for i in range(nchannels):
+    ax[i].imshow(cube_features[n][:,:,:,i].sum(axis=0))
+    ax[i].set_title(ftname[i])
+ax[-1].imshow(cube_target[n][:,:,:,0].sum(axis=0))
+ax[-1].set_title('Target')
+plt.savefig('./figs/features%s.png'%suff)
 
 #############################
-
-fig, ax = plt.subplots(1, 2, figsize = (12, 5))
-
-i = 10
-# ax[0].imshow(cube_features[i][:,:,:,0].sum(axis=0))
-# ax[1].imshow(cube_target[i][:,:,:,0].sum(axis=0))
-ax[0].imshow(cube_features[i][0,:,:,0])
-ax[1].imshow(cube_target[i][0,:,:,0])
-plt.savefig('./figs/tmp.png')
-
-
-
+### Model
 
 # Implement a simple masked CNN layer
 # Using the shifting idea of the pixelCNN++
@@ -113,14 +114,14 @@ def down_right_shifted_conv3d(x, num_filters, filter_size=[2,2,2], stride=[1,1,1
     x = tf.pad(x, [[0,0], [filter_size[0]-1, 0], [filter_size[1]-1, 0], [filter_size[2]-1, 0], [0,0]])
     return slim.conv3d(x, num_filters, filter_size, stride=stride, padding='valid', **kwargs)
 
-batch_size=64
+
 
 # Input features, density field
-x = tf.placeholder(tf.float32, shape=[batch_size, 32,32,32,1])
+x = tf.placeholder(tf.float32, shape=[None, 32,32,32,nchannels], name='input')
 
 # Output features, halos
-y = tf.placeholder(tf.float32, shape=[batch_size, 32,32,32,1])
-lr = tf.placeholder(tf.float32)
+y = tf.placeholder(tf.float32, shape=[None, 32,32,32,1], name='labels')
+lr = tf.placeholder(tf.float32, name='learningrate')
 
 # Apply a masked convolution at the input y to prevent self-connection
 # net = tf.concat([slim.conv3d(x, 16, 3, activation_fn=tf.nn.leaky_relu),
@@ -129,20 +130,26 @@ net = slim.conv3d(x, 16, 3, activation_fn=tf.nn.leaky_relu)
 net = slim.conv3d(net, 64, 3, activation_fn=tf.nn.leaky_relu) #down_right_shifted_conv3d(net, 32, activation_fn=tf.nn.leaky_relu)
 net = slim.conv3d(net, 16, 3, activation_fn=tf.nn.leaky_relu)#down_right_shifted_conv3d(net, 1, activation_fn=None)
 net = slim.conv3d(net, 1, 3, activation_fn=None)
-pred = tf.nn.sigmoid(net)
+pred = tf.nn.sigmoid(net, name='prediction')
 
 loss = tf.losses.sigmoid_cross_entropy(y, net)
-optimizer = tf.train.AdamOptimizer(learning_rate=lr)
+optimizer = tf.train.AdamOptimizer(learning_rate=lr, name='optimizer')
 
-opt_op = optimizer.minimize(loss)
+opt_op = optimizer.minimize(loss, name='minimize')
+
+
+#############################
+###Train
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 
 losses = []
 
-niter= 100
-nprint = 10
+niter= 2000
+nprint = 100
+batch_size=32
+#
 start = time()
 curr = time()
 for it in range(niter):
@@ -150,32 +157,36 @@ for it in range(niter):
     _, l = sess.run([opt_op, loss], feed_dict={lr:0.0001, x:cube_features[inds], y:cube_target[inds]})
     #print(it, l)
     if it % nprint == 0:
-        print(it//nprint, l)
+        print('Iteration %d of %d'%(it, niter), '\nLoss = ', l)
         end = time()
-        print('Time taken for %d iteration = '%it, end - start)
-        print('Time taken for %d iteration = '%nprint, end - curr)
+        print('Time taken for last batch = %0.3f, Total time elapsed = %0.3f'%(end-curr, end - start))
         curr = end
     losses.append(l)
 
 print('Time taken for training = ', end - start)
 
+#Save loss
 plt.figure()
 plt.plot(losses)
-plt.savefig('./figs/tmp2.png')
+plt.loglog()
+plt.savefig('./figs/loss%s.png'%suff)
 
 
-rec,recp = sess.run([net, pred], feed_dict={x:cube_features[inds], y:cube_target[inds]})
+#Save
+saver = tf.train.Saver()
+saver.save(sess, './models/test%s'%suff)
 
+
+ind = 0
+input = cube_features[ind]
+recp = sess.run(pred, feed_dict={x:input.reshape(1, *input.shape)})
 
 fig, ax = plt.subplots(1, 3, figsize=(15,7))
-ax[0].imshow(recp[3,0,:,:,0]);
+ax[0].imshow(recp[0,0,:,:,0]);
 ax[0].set_title('predict')
-ax[1].imshow(cube_target[inds][3,0,:,:,0],vmax=1);
+ax[1].imshow(cube_target[ind,0,:,:,0],vmax=1);
 ax[1].set_title('target')
-ax[2].imshow(cube_features[inds][3,0,:,:,0]);
+ax[2].imshow(cube_features[ind,0,:,:,0]);
 ax[2].set_title('features')
-plt.savefig('./figs/tmp3.png')
+plt.savefig('./figs/pred%s.png'%suff)
 
-
-saver = tf.train.Saver()
-saver.save(sess, './models/test0')
