@@ -39,8 +39,8 @@ kk = tools.fftk((ncp, ncp, ncp), bs)
 
 tf.reset_default_graph()
 
-suff = '-pad4_cdg'
-ftname = ['cic', 'GD']
+suff = 'pad4v2'
+ftname = ['cic']
 nchannels = len(ftname)
 
 cube_size = 32
@@ -49,14 +49,16 @@ pad = 4
 cube_sizeft = cube_size + 2*pad
 
 #
+niter = 1000
 sess = tf.Session()
-modname = 'test%s'%suff
-saver = tf.train.import_meta_graph('./../code/models/n%02d/%s.meta'%(numd*1e4, modname))
-saver.restore(sess,'./../code/models/n%02d/%s'%(numd*1e4, modname))
+chkname = suff #+'_it%d'%niter
+
+saver = tf.train.import_meta_graph('./../code/models/n%02d/%s/%s.meta'%(numd*1e4, suff, chkname))
+saver.restore(sess,'./../code/models/n%02d/%s/%s'%(numd*1e4, suff, chkname))
 g = sess.graph
 prediction = g.get_tensor_by_name('prediction:0')
 input = g.get_tensor_by_name('input:0')
-
+kprob = g.get_tensor_by_name('keepprob:0')
 
 #############################
 meshes = {}
@@ -83,10 +85,11 @@ for seed in seeds:
     ftlist = [mesh[i].copy() for i in ftname]
     ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
     targetmesh = hmesh['target']
-
+    targetmesh[targetmesh > 1] = 1
+    
     ncube = int(ncp/cube_size)
     inp = dtools.splitvoxels(ftlistpad, cube_size=cube_sizeft, shift=cube_size, ncube=ncube)
-    recp = sess.run(prediction, feed_dict={input:inp})
+    recp = sess.run(prediction, feed_dict={input:inp, kprob:1})
     mesh['predict'] = dtools.uncubify(recp[:,:,:,:,0], shape)
     
     meshes[seed] = [mesh, hmesh]

@@ -32,10 +32,11 @@ R2 = 3*1.2
 kny = np.pi*ncp/bs
 kk = tools.fftk((ncp, ncp, ncp), bs)
 seeds = [100, 200, 300, 400]
+rprob = 0.
 
 #############################
 
-suff = '-pad4'
+suff = 'pad4v2'
 num_cubes= 1000
 cube_size = 32
 pad = 4
@@ -60,9 +61,13 @@ for seed in seeds:
 
     hmesh = {}
     hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]
+    massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
     hposd = hposall[:num].copy()
+    massd = massall[:num].copy()
     hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
     hmesh['pnn'] = tools.paintnn(hposd, bs, ncp)
+    hmesh['mcic'] = tools.paintcic(hposd, bs, nc, mass=massd)
+    hmesh['mnn'] = tools.paintnn(hposd, bs, ncp, mass=massd)
 
     meshes[seed] = [mesh, hmesh]
 
@@ -72,7 +77,10 @@ for seed in seeds:
     ftlist = [mesh[i].copy() for i in ftname]
     ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
     targetmesh = hmesh['pnn']
-    features, target = dtools.randomvoxels(ftlistpad, targetmesh, num_cubes, max_offset, cube_size, cube_sizeft)
+    #Round off things to 1 again
+    targetmesh[targetmesh > 1] = 1
+    
+    features, target = dtools.randomvoxels(ftlistpad, targetmesh, num_cubes, max_offset, cube_size, cube_sizeft, rprob=rprob)
     cube_features = cube_features + features
     cube_target = cube_target + target
 
@@ -98,23 +106,28 @@ plt.savefig('./figs/n%02d/features%s.png'%(numd*1e4, suff))
 #############################
 ### Model
 
-
-# Input features, density field
-
 x = tf.placeholder(tf.float32, shape=[None, cube_sizeft, cube_sizeft, cube_sizeft, nchannels], name='input')
 y = tf.placeholder(tf.float32, shape=[None, cube_size, cube_size, cube_size, 1], name='labels')
 lr = tf.placeholder(tf.float32, name='learningrate')
-
-wregwt, bregwt = 0.02, 0.02
+keepprob = tf.placeholder(tf.float32, name='keepprob')
+#
+wregwt, bregwt = 0.001, 0.001
 wreg = slim.regularizers.l2_regularizer(wregwt)
 breg = slim.regularizers.l2_regularizer(bregwt)
+#
 net = slim.conv3d(x, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
-net = slim.conv3d(net, 64, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
-net = slim.conv3d(net, 128, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-net = slim.conv3d(net, 64, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-net = slim.conv3d(net, 16, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-net = slim.conv3d(net, 1, 3, activation_fn=None, weights_regularizer=wreg, biases_regularizer=breg)
-pred = tf.nn.sigmoid(net, name='prediction')
+drop = tf.nn.dropout(net, keep_prob=keepprob)
+net = slim.conv3d(drop, 64, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
+drop = tf.nn.dropout(net, keep_prob=keepprob)
+#net = slim.conv3d(drop, 128, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
+#drop = tf.nn.dropout(net, keep_prob=keepprob)
+#net = slim.conv3d(drop, 64, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
+#drop = tf.nn.dropout(net, keep_prob=keepprob)
+net = slim.conv3d(drop, 16, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
+drop = tf.nn.dropout(net, keep_prob=keepprob)
+net = slim.conv3d(drop, 1, 3, activation_fn=None, weights_regularizer=wreg, biases_regularizer=breg)
+drop = tf.nn.dropout(net, keep_prob=keepprob)
+pred = tf.nn.sigmoid(drop, name='prediction')
 
 loss = tf.losses.sigmoid_cross_entropy(y, net)
 optimizer = tf.train.AdamOptimizer(learning_rate=lr, name='optimizer')
@@ -130,19 +143,34 @@ sess.run(tf.global_variables_initializer())
 
 losses = []
 
-niter= 5000
+niter= 1000
 nprint = 100
 batch_size=32
 #
 start = time()
 curr = time()
-lr0, nlr = 0.0005, int(1000)
+
+lr0, lrfac, nlr = 0.001, 10, int(500)
+lr0 *= lrfac
+kprob = 1.0
+
+#Save
+saver = tf.train.Saver()
+
 for it in range(niter):
     inds = np.random.choice(int(trainingsize), batch_size, replace=False)
-    _, l = sess.run([opt_op, loss], feed_dict={lr:lr0, x:cube_features[inds], y:cube_target[inds]})
-    if it % nlr == nlr-1:
-        lr0 /= 2
-        print('reduce learning rate by half. New learning rate = %0.2e'%lr0)        
+    _, l = sess.run([opt_op, loss], feed_dict={lr:lr0, keepprob:kprob, x:cube_features[inds], y:cube_target[inds]})
+    if it % nlr == 0:
+        lr0 /= lrfac
+        print('reduce learning rate by factor of %0.2f. New learning rate = %0.2e'%(lrfac, lr0))
+        #Save loss
+        plt.figure()
+        plt.semilogy(losses)
+        #plt.loglog()
+        plt.savefig('./figs/n%02d/loss%s.png'%(numd*1e4, suff))
+        plt.close()
+        saver.save(sess, './models/n%02d/%s/%s_it%d'%(numd*1e4, suff, suff, it))
+
     if it % nprint == 0:
         print('Iteration %d of %d'%(it, niter), '\nLoss = ', l)
         end = time()
@@ -151,22 +179,14 @@ for it in range(niter):
     losses.append(l)
 
 print('Time taken for training = ', end - start)
-
-#Save loss
-plt.figure()
-plt.plot(losses)
-plt.loglog()
-plt.savefig('./figs/n%02d/loss%s.png'%(numd*1e4, suff))
+saver.save(sess, './models/n%02d/%s/%s'%(numd*1e4, suff, suff))
 
 
-#Save
-saver = tf.train.Saver()
-saver.save(sess, './models/n%02d/test%s'%(numd*1e4, suff))
 
 
 ind = 0
 input = cube_features[ind]
-recp = sess.run(pred, feed_dict={x:input.reshape(1, *input.shape)})
+recp = sess.run(pred, feed_dict={x:input.reshape(1, *input.shape), keepprob:1})
 
 fig, ax = plt.subplots(1, 3, figsize=(15,7))
 ax[0].imshow(recp[ind,0,:,:,0]);
