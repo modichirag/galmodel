@@ -197,9 +197,12 @@ def periodic(ar1):
     return ar2
 
 
-def randomvoxels(ftlist, target, num_cubes, max_offset, cube_size=32, cube_sizeft=32, seed=100):
+
+
+def randomvoxels(ftlist, target, num_cubes, max_offset, cube_size=32, cube_sizeft=32, seed=100, rprob=0.0):
     '''Generate 'num_cubes' training voxels of 'cube_size' for target and 'cube_sizeft' for features
-    from the meshes in 'ftlist' for features and 'target' for target
+    from the meshes in 'ftlist' for features and 'target' for target.
+    Rotate voxels with probability 'rprob'
     '''
     np.random.seed(seed)
     rand = np.random.rand
@@ -217,11 +220,27 @@ def randomvoxels(ftlist, target, num_cubes, max_offset, cube_size=32, cube_sizef
         y1, y2, y2p = offset_y, offset_y+cube_size, offset_y+cube_sizeft
         z1, z2, z2p = offset_z, offset_z+cube_size, offset_z+cube_sizeft
 
-        features = []
-        for i in range(nchannels): features.append(ftlist[i][x1:x2p, y1:y2p, z1:z2p])
-        features = np.stack(features, axis=-1)
-        cube_features.append(features)
-        cube_target.append((target[x1:x2, y1:y2, z1:z2]))
+        rotate = False
+        rotation = []
+        while np.random.random() < rprob:
+            rotate = True
+            nrot, ax0, ax1 = np.random.randint(0, 3), *np.random.permutation((0, 1, 2))[:2]
+            rotation.append([nrot, ax0, ax1])
+
+        features = []        
+        for i in range(nchannels):
+            tmp = ftlist[i][x1:x2p, y1:y2p, z1:z2p].copy()
+            if rotate:
+                for j in rotation:
+                    tmp = np.rot90(tmp, k=j[0], axes=(j[1], j[2]))
+            features.append(tmp)
+        cube_features.append(np.stack(features, axis=-1))
+
+        tmp = target[x1:x2, y1:y2, z1:z2].copy()
+        if rotate:
+            for j in rotation:
+                tmp = np.rot90(tmp, k=j[0], axes=(j[1], j[2]))
+        cube_target.append(tmp)
 
     return cube_features, cube_target
 
