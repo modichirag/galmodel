@@ -1,13 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 #
-import sys
+import sys, os
 sys.path.append('./utils/')
 import tools
 import datalib as dlib
 import datatools as dtools
 from time import time
 #
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tensorflow.contrib.slim import add_arg_scope
@@ -29,7 +30,7 @@ path = './../data/z00/'
 ftype = 'L%04d_N%04d_S%04d_%02dstep/'
 numd = 1e-3
 num = int(numd*bs**3)
-seeds = [100, 200, 500]
+seeds = [100, 200, 500, 700]
 R1 = 3
 R2 = 3*1.2
 kny = np.pi*ncp/bs
@@ -39,7 +40,7 @@ kk = tools.fftk((ncp, ncp, ncp), bs)
 
 tf.reset_default_graph()
 
-suff = 'pad4v2'
+suff = 'pad4d9regresv1'
 ftname = ['cic']
 nchannels = len(ftname)
 
@@ -58,7 +59,7 @@ saver.restore(sess,'./../code/models/n%02d/%s/%s'%(numd*1e4, suff, chkname))
 g = sess.graph
 prediction = g.get_tensor_by_name('prediction:0')
 input = g.get_tensor_by_name('input:0')
-kprob = g.get_tensor_by_name('keepprob:0')
+keepprob = g.get_tensor_by_name('keepprob:0')
 
 #############################
 meshes = {}
@@ -67,10 +68,11 @@ for seed in seeds:
     mesh = {}
     partp = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'dynamic/1/Position/')
     mesh['cic'] = tools.paintcic(partp, bs, ncp)
-    #mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
+    mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
     mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
     mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
     mesh['GD'] = mesh['R1'] - mesh['R2']
+    mesh['s'] = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/s/')
 
     hmesh = {}
     hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]
@@ -85,11 +87,11 @@ for seed in seeds:
     ftlist = [mesh[i].copy() for i in ftname]
     ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
     targetmesh = hmesh['target']
-    targetmesh[targetmesh > 1] = 1
+    #targetmesh[targetmesh > 1] = 1
     
     ncube = int(ncp/cube_size)
     inp = dtools.splitvoxels(ftlistpad, cube_size=cube_sizeft, shift=cube_size, ncube=ncube)
-    recp = sess.run(prediction, feed_dict={input:inp, kprob:1})
+    recp = sess.run(prediction, feed_dict={input:inp, keepprob:1})
     mesh['predict'] = dtools.uncubify(recp[:,:,:,:,0], shape)
     
     meshes[seed] = [mesh, hmesh]
@@ -116,10 +118,12 @@ for seed in seeds:
     # plt.plot(k, pkpredall/pkhd)
     
 ax[0].legend(fontsize=14)
-ax[0].grid(which='both')
-ax[1].grid(which='both')
 ax[0].set_title('Trasnfer function', fontsize=14)
 ax[1].set_title('Cross correlation', fontsize=14)
+for axis in ax: axis.set_ylim(0., 1.1)
+for axis in ax: axis.set_yticks(np.arange(0, 1.1, 0.1))
+for axis in ax: axis.grid(which='both')
+
 plt.savefig('./figs/n%02d/2ptpredict%s.png'%(numd*1e4, suff))
 
 fig, ax = plt.subplots(1, 3, figsize = (14, 4))

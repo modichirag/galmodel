@@ -220,13 +220,18 @@ def randomvoxels(ftlist, target, num_cubes, max_offset, cube_size=32, cube_sizef
         y1, y2, y2p = offset_y, offset_y+cube_size, offset_y+cube_sizeft
         z1, z2, z2p = offset_z, offset_z+cube_size, offset_z+cube_sizeft
 
+#        features = []
+#        for i in range(nchannels): features.append(ftlist[i][x1:x2p, y1:y2p, z1:z2p])
+#        features = np.stack(features, axis=-1)
+#        cube_features.append(features)
+#        cube_target.append((target[x1:x2, y1:y2, z1:z2]))
+#
         rotate = False
         rotation = []
         while np.random.random() < rprob:
             rotate = True
             nrot, ax0, ax1 = np.random.randint(0, 3), *np.random.permutation((0, 1, 2))[:2]
             rotation.append([nrot, ax0, ax1])
-
         features = []        
         for i in range(nchannels):
             tmp = ftlist[i][x1:x2p, y1:y2p, z1:z2p].copy()

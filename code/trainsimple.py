@@ -109,10 +109,15 @@ plt.savefig('./figs/features%s.png'%suff)
 # Implement a simple masked CNN layer
 # Using the shifting idea of the pixelCNN++
 
-@add_arg_scope
-def down_right_shifted_conv3d(x, num_filters, filter_size=[2,2,2], stride=[1,1,1], **kwargs):
-    x = tf.pad(x, [[0,0], [filter_size[0]-1, 0], [filter_size[1]-1, 0], [filter_size[2]-1, 0], [0,0]])
-    return slim.conv3d(x, num_filters, filter_size, stride=stride, padding='valid', **kwargs)
+#@add_arg_scope
+#def down_right_shifted_conv3d(x, num_filters, filter_size=[2,2,2], stride=[1,1,1], **kwargs):
+#    x = tf.pad(x, [[0,0], [filter_size[0]-1, 0], [filter_size[1]-1, 0], [filter_size[2]-1, 0], [0,0]])
+#    return slim.conv3d(x, num_filters, filter_size, stride=stride, padding='valid', **kwargs)
+
+# Apply a masked convolution at the input y to prevent self-connection
+# net = tf.concat([slim.conv3d(x, 16, 3, activation_fn=tf.nn.leaky_relu),
+#                  down_right_shifted_conv3d(y, 16, activation_fn=tf.nn.leaky_relu)],axis=-1)
+
 
 
 
