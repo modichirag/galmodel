@@ -38,19 +38,21 @@ rprob = 0.5
 
 #############################
 
-suff = 'pad4d9resv1'
+suff = 'pad2d8regv1'
 if not os.path.exists('models/n%02d/%s'%(numd*1e4, suff)):
     os.makedirs('models/n%02d/%s'%(numd*1e4, suff))
 fname = open('models/n%02d/%s/log'%(numd*1e4, suff), 'w+', 1)
+#fname = None
 num_cubes= 1000
 cube_size = 32
-pad = 4
+pad = 2
 cube_sizeft = cube_size + 2*pad
 max_offset = ncp - cube_size
 ftname = ['cic']
 nchannels = len(ftname)
 print('Features are ', ftname, file=fname)
 print('Pad with ', pad, file=fname)
+print('Rotation probability = %0.2f'%rprob, file=fname)
 
 #############################
 ##Read data and generate meshes
@@ -72,7 +74,7 @@ for seed in seeds:
     massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
     hposd = hposall[:num].copy()
     massd = massall[:num].copy()
-    hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
+    #hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
     hmesh['pnn'] = tools.paintnn(hposd, bs, ncp)
     hmesh['mcic'] = tools.paintcic(hposd, bs, nc, mass=massd)
     hmesh['mnn'] = tools.paintnn(hposd, bs, ncp, mass=massd)
@@ -88,7 +90,8 @@ for seed in seeds:
     #Round off things to 1 again
     targetmesh[targetmesh > 1] = 1
     
-    features, target = dtools.randomvoxels(ftlistpad, targetmesh, num_cubes, max_offset, cube_size, cube_sizeft, rprob=rprob)
+    features, target = dtools.randomvoxels(ftlistpad, targetmesh, num_cubes, max_offset,
+                                           cube_size, cube_sizeft, seed=seed, rprob=rprob)
     cube_features = cube_features + features
     cube_target = cube_target + target
 
@@ -118,8 +121,9 @@ y = tf.placeholder(tf.float32, shape=[None, cube_size, cube_size, cube_size, 1],
 lr = tf.placeholder(tf.float32, name='learningrate')
 keepprob = tf.placeholder(tf.float32, name='keepprob')
 print('Shape of training and testing data is : ', x.shape, y.shape, file=fname)
+
 #
-wregwt, bregwt = 0.00, 0.00
+wregwt, bregwt = 0.001, 0.001
 if wregwt: wreg = slim.regularizers.l2_regularizer(wregwt)
 else: wreg = None
 if bregwt: breg = slim.regularizers.l2_regularizer(bregwt)
@@ -127,31 +131,24 @@ else: breg = None
 print('Regularizing weights are : ', wregwt, bregwt, file=fname)
 #
 net = slim.conv3d(x, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
-drop = tf.nn.dropout(net, keep_prob=keepprob)
-net = slim.conv3d(drop, 64, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
-drop = tf.nn.dropout(net, keep_prob=keepprob)
-#net = slim.conv3d(drop, 128, 5, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-#drop = tf.nn.dropout(net, keep_prob=keepprob)
-#net = slim.conv3d(drop, 64, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-#drop = tf.nn.dropout(net, keep_prob=keepprob)
-#net = slim.conv3d(drop, 16, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-#drop = tf.nn.dropout(net, keep_prob=keepprob)
-#net = slim.conv3d(drop, 1, 3, activation_fn=None, weights_regularizer=wreg, biases_regularizer=breg)
+#net = tf.nn.dropout(net, keep_prob=keepprob)
+#net = slim.conv3d(net, 32, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
+#net = tf.nn.dropout(net, keep_prob=keepprob)
+#net = slim.conv3d(net, 128, 5, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
+#net = tf.nn.netout(net, keep_prob=keepprob)
+#net = slim.conv3d(net, 64, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
+#net = tf.nn.netout(net, keep_prob=keepprob)
+#net = slim.conv3d(net, 16, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
+#net = tf.nn.netout(net, keep_prob=keepprob)
+#net = slim.conv3d(net, 1, 3, activation_fn=None, weights_regularizer=wreg, biases_regularizer=breg)
 #pred = tf.nn.sigmoid(net, name='prediction')
+net = wide_resnet(net, 32, keep_prob=keepprob, activation_fn=tf.nn.leaky_relu)
 net = wide_resnet(net, 64, keep_prob=keepprob, activation_fn=tf.nn.leaky_relu)
 net = wide_resnet(net, 32, keep_prob=keepprob, activation_fn=tf.nn.leaky_relu)
 net = wide_resnet(net, 16, keep_prob=keepprob, activation_fn=tf.nn.leaky_relu)
 net = slim.conv3d(net, 1, 3, activation_fn=None)
 pred = tf.nn.sigmoid(net, name='prediction')
 #####
-#net = slim.conv3d(x, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
-#net = slim.conv3d(net, 64, 5, activation_fn=tf.nn.leaky_relu, padding='valid', weights_regularizer=wreg, biases_regularizer=breg)
-##net = slim.conv3d(net, 128, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-##net = slim.conv3d(net, 64, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-#net = slim.conv3d(net, 16, 3, activation_fn=tf.nn.leaky_relu, weights_regularizer=wreg, biases_regularizer=breg)
-#net = slim.conv3d(net, 1, 3, activation_fn=None, weights_regularizer=wreg, biases_regularizer=breg)
-#pred = tf.nn.sigmoid(net, name='prediction')
-####
 loss = tf.losses.sigmoid_cross_entropy(y, net)
 optimizer = tf.train.AdamOptimizer(learning_rate=lr, name='optimizer')
 
@@ -166,18 +163,19 @@ sess.run(tf.global_variables_initializer())
 
 losses = []
 
-niter= 12000
+niter= 6000
 nprint = 100
 batch_size=32
 #
 start = time()
 curr = time()
 
-lr0, lrfac, nlr = 0.001, 10, int(3000)
+lr0, lrfac, nlr = 0.001, 10, int(2500)
 lr0 *= lrfac
-kprob = 0.9
+kprob = 0.8
 
 print('Batch size, dropout, niter : ', batch_size, kprob, niter, file=fname)
+print('lr0, lrfac, nlr : ', lr0, lrfac, nlr, file=fname)
 #Save
 saver = tf.train.Saver()
 

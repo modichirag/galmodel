@@ -199,19 +199,28 @@ def periodic(ar1):
 
 
 
-def randomvoxels(ftlist, target, num_cubes, max_offset, cube_size=32, cube_sizeft=32, seed=100, rprob=0.0):
+def randomvoxels(ftlist, targetlist, num_cubes, max_offset, cube_size=32, cube_sizeft=32, seed=100, rprob=0.0):
     '''Generate 'num_cubes' training voxels of 'cube_size' for target and 'cube_sizeft' for features
-    from the meshes in 'ftlist' for features and 'target' for target.
+    from the meshes in 'ftlist' for features and targets in 'target'.
     Rotate voxels with probability 'rprob'
     '''
     np.random.seed(seed)
     rand = np.random.rand
 
     nchannels = len(ftlist)
+    if type(targetlist) == list:
+        pass
+    else:
+        targetlist = [targetlist]
+    ntarget = len(targetlist)
+    print('Length of targets = ', ntarget)
+
     cube_features = []
     cube_target = []
 
+    nrotated = 0 
     for it in range(num_cubes):
+        #print(it)
         # Extract random cubes from the sim
         offset_x = round(rand()*max_offset)
         offset_y = round(rand()*max_offset)
@@ -220,33 +229,41 @@ def randomvoxels(ftlist, target, num_cubes, max_offset, cube_size=32, cube_sizef
         y1, y2, y2p = offset_y, offset_y+cube_size, offset_y+cube_sizeft
         z1, z2, z2p = offset_z, offset_z+cube_size, offset_z+cube_sizeft
 
-#        features = []
-#        for i in range(nchannels): features.append(ftlist[i][x1:x2p, y1:y2p, z1:z2p])
-#        features = np.stack(features, axis=-1)
-#        cube_features.append(features)
-#        cube_target.append((target[x1:x2, y1:y2, z1:z2]))
-#
+        features = []
+        for i in range(nchannels): features.append(ftlist[i][x1:x2p, y1:y2p, z1:z2p])
+        cube_features.append(np.stack(features, axis=-1))
+        #
+        targets = []
+        for i in range(ntarget): targets.append(targetlist[i][x1:x2, y1:y2, z1:z2])
+        cube_target.append(np.stack(targets, axis=-1))
+        
         rotate = False
         rotation = []
-        while np.random.random() < rprob:
+        while (np.random.random() < rprob) & (len(rotation) <= 3):
             rotate = True
             nrot, ax0, ax1 = np.random.randint(0, 3), *np.random.permutation((0, 1, 2))[:2]
             rotation.append([nrot, ax0, ax1])
-        features = []        
-        for i in range(nchannels):
-            tmp = ftlist[i][x1:x2p, y1:y2p, z1:z2p].copy()
-            if rotate:
-                for j in rotation:
-                    tmp = np.rot90(tmp, k=j[0], axes=(j[1], j[2]))
-            features.append(tmp)
-        cube_features.append(np.stack(features, axis=-1))
 
-        tmp = target[x1:x2, y1:y2, z1:z2].copy()
-        if rotate:
+        def do_rotation(ar):
             for j in rotation:
-                tmp = np.rot90(tmp, k=j[0], axes=(j[1], j[2]))
-        cube_target.append(tmp)
+                ar = np.rot90(ar, k=j[0], axes=(j[1], j[2]))
+            return ar
+        
+        if rotate:
+            nrotated +=1
+            #Do for features
+            features = []
+            for i in range(nchannels):
+                features.append(do_rotation(ftlist[i][x1:x2p, y1:y2p, z1:z2p]))#.copy()
+            cube_features.append(np.stack(features, axis=-1))
 
+            #Do for targets
+            targets = []
+            for i in range(ntarget):
+                targets.append(do_rotation(targetlist[i][x1:x2, y1:y2, z1:z2]))#.copy()
+            cube_target.append(np.stack(targets, axis=-1))
+            
+    print('Supplemented by rotation : ', nrotated)
     return cube_features, cube_target
 
     
@@ -264,7 +281,7 @@ def splitvoxels(ftlist, cube_size, shift=None, ncube=None):
             for k in range(ncube):
                 x1, y1, z1 = i*shift, j*shift, k*shift
                 x2, y2, z2 = x1+cube_size, y1+cube_size, z1+cube_size
-                fts = np.stack([ar[x1:x2, y1:y2, z1:z2].copy() for ar in ftlist], axis=-1)
+                fts = np.stack([ar[x1:x2, y1:y2, z1:z2] for ar in ftlist], axis=-1)
                 inp.append(fts)
 
     inp = np.stack(inp, axis=0)

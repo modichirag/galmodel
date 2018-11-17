@@ -12,6 +12,7 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0"
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tensorflow.contrib.slim import add_arg_scope
+from layers import wide_resnet
 
 #############################
 seed_in = 5
@@ -40,17 +41,17 @@ kk = tools.fftk((ncp, ncp, ncp), bs)
 
 tf.reset_default_graph()
 
-suff = 'pad4d9regresv1'
+suff = 'pad2d8regv1'
 ftname = ['cic']
 nchannels = len(ftname)
 
 cube_size = 32
 max_offset = ncp - cube_size
-pad = 4
+pad = 2
 cube_sizeft = cube_size + 2*pad
 
 #
-niter = 1000
+niter = 9000
 sess = tf.Session()
 chkname = suff #+'_it%d'%niter
 
@@ -87,7 +88,7 @@ for seed in seeds:
     ftlist = [mesh[i].copy() for i in ftname]
     ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
     targetmesh = hmesh['target']
-    #targetmesh[targetmesh > 1] = 1
+    targetmesh[targetmesh > 1] = 1
     
     ncube = int(ncp/cube_size)
     inp = dtools.splitvoxels(ftlistpad, cube_size=cube_sizeft, shift=cube_size, ncube=ncube)
