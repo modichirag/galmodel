@@ -271,6 +271,7 @@ def splitvoxels(ftlist, cube_size, shift=None, ncube=None):
     '''Split the meshes in ftlist in voxels of 'cube_size' in a regular fashion by
     shifting with 'shift' over the range of (0, ncp) on the mesh
     '''
+    if type(ftlist) is not list: ftlist = [ftlist]
     ncp = ftlist[0].shape[0]
     if shift is None: shift = cube_size
     if ncube is None: ncube = int(ncp/shift)
