@@ -222,9 +222,9 @@ def randomvoxels(ftlist, targetlist, num_cubes, max_offset, cube_size=32, cube_s
     for it in range(num_cubes):
         #print(it)
         # Extract random cubes from the sim
-        offset_x = round(rand()*max_offset)
-        offset_y = round(rand()*max_offset)
-        offset_z = round(rand()*max_offset)
+        offset_x = int(round(rand()*max_offset))
+        offset_y = int(round(rand()*max_offset))
+        offset_z = int(round(rand()*max_offset))
         x1, x2, x2p = offset_x, offset_x+cube_size, offset_x+cube_sizeft
         y1, y2, y2p = offset_y, offset_y+cube_size, offset_y+cube_sizeft
         z1, z2, z2p = offset_z, offset_z+cube_size, offset_z+cube_sizeft
