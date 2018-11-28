@@ -35,17 +35,17 @@ R1 = 3
 R2 = 3*1.2
 kny = np.pi*ncp/bs
 kk = tools.fftk((ncp, ncp, ncp), bs)
-seeds = [100, 200, 300, 400]
-rprob = 0.5
+seeds = [100, 200, 300, 400, 800, 900]
+rprob = 0.6
 
 #############################
 
-suff = 'pad2d9rg1wt5v0'
+suff = 'pad2d9wt0v2'
 if not os.path.exists('models/gal%02d/%s'%(numd*1e4, suff)):
     os.makedirs('models/gal%02d/%s'%(numd*1e4, suff))
 fname = open('models/gal%02d/%s/log'%(numd*1e4, suff), 'w+', 1)
 #fname  = None
-num_cubes= 1000
+num_cubes= 500
 cube_size = 32
 pad = 2
 cube_sizeft = cube_size + 2*pad
@@ -143,7 +143,7 @@ lr = tf.placeholder(tf.float32, name='learningrate')
 net = slim.conv3d(x, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
 # net = slim.conv3d(net, 32, 5, activation_fn=None, padding='valid')
 net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=keepprob)
-#net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=keepprob)
+net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=keepprob)
 net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=keepprob)
 net = slim.conv3d(net, 64, 1, activation_fn=tf.nn.relu6)
 net = tf.nn.dropout(net, keep_prob=keepprob)
@@ -152,8 +152,8 @@ net = tf.nn.dropout(net, keep_prob=keepprob)
 #out_rate = slim.conv3d(net, 1, 3, activation_fn=tf.nn.relu)
 out_rate = slim.conv3d(net, 1, 1, activation_fn=tf.nn.relu, 
                        #weights_initializer=tf.initializers.random_normal(mean=1, stddev=0.25))
-                       weights_initializer=tf.initializers.random_uniform(minval=0.1, maxval=1))
-out_rate = tf.math.add(out_rate, 1e-6, name='rate')
+                       weights_initializer=tf.initializers.random_uniform(minval=0.01, maxval=1))
+out_rate = tf.math.add(out_rate, 1e-8, name='rate')
 
 # Predicted mask
 out_mask = slim.conv3d(net, 1, 1, activation_fn=None)
@@ -186,8 +186,8 @@ nsat = np.unique(cube_target[mmask][:, 1], return_counts=True)
 
 wts = cube_target[:, :, :, :, 1].copy()
 for i, ns in enumerate(nsat[0]):
-    wts[wts == ns] = 1/nsat[1][i]**0.5
-    #wts[wts == ns] = 1
+    #wts[wts == ns] = 1/nsat[1][i]**0.5
+    wts[wts == ns] = 1
 
 wts *= mmask
 print('Weights = ', np.unique(wts, return_counts=True))
@@ -201,13 +201,13 @@ sess.run(tf.global_variables_initializer())
 
 losses = []
 
-niter = 5000
+niter = 25000
 nprint = 100
 batch_size = 32
 #
 start = time()
 curr = time()
-lr0, lrfac, nlr = 0.001, 10, int(2000)
+lr0, lrfac, nlr = 0.001, 10, int(4000)
 lr0 *= lrfac
 kprob = 0.9
 lacc = 0 

@@ -43,7 +43,7 @@ kk = tools.fftk((ncp, ncp, ncp), bs)
 
 tf.reset_default_graph()
 
-suff = 'pad2d9rg1wt0v0'
+suff = 'pad2d9wt0v2'
 ftname = ['cic']
 nchannels = len(ftname)
 
@@ -110,7 +110,8 @@ for seed in tseeds:
     mesh['predict'] = mesh['predictcen'] + mesh['predictsat']
     mesh['rates'] =  dtools.uncubify(rates[:,:,:,:,0], [nc,nc,nc])
     meshes[seed] = [mesh, hmesh]    
-
+    print('Number of predicted & true satellites = ', satmesh.sum(), hmesh['pnnsat'].sum())
+    
 ##############################
 ##Power spectrum
 
@@ -129,7 +130,15 @@ for seed in tseeds:
         ax[0, i].semilogx(k[1:], pkpred[1:]/pkhd[1:], label=seed)
         ax[1, i].semilogx(k[1:], pkhx[1:]/(pkpred[1:]*pkhd[1:])**0.5)
         ax[0, i].set_title(key, fontsize=12)
-    
+#    mask = meshes[seed][0]['predictcen']
+#    predict *= mask
+#    k, pkpred = tools.power(predict/predict.mean(), boxsize=bs, k=kmesh)
+#    k, pkhx = tools.power(hpmeshd/hpmeshd.mean(), predict/predict.mean(), boxsize=bs, k=kmesh)    
+#    ##
+#    ax[0, i].semilogx(k[1:], pkpred[1:]/pkhd[1:], label=seed, ls="--")
+#    ax[1, i].semilogx(k[1:], pkhx[1:]/(pkpred[1:]*pkhd[1:])**0.5, ls="--")
+#    
+        
 for axis in ax.flatten():
     axis.legend(fontsize=14)
     axis.set_yticks(np.arange(0, 1.1, 0.1))
@@ -153,7 +162,44 @@ for i, key in enumerate(['', 'cen', 'sat']):
 ax[0, 0].set_title('All Gal', fontsize=15)
 ax[0, 0].set_ylabel('Prediction', fontsize=15)
 ax[1, 0].set_ylabel('Truth', fontsize=15)
-plt.show()
+#plt.show()
 plt.savefig('./figs/gal%02d/impredict%s.png'%(numd*1e4, suff))
 
+##
+plt.figure()
+for seed in tseeds:
+    rates = meshes[seed][0]['rates']
+    plt.hist(rates.flatten(), range=(1e-3, 10), histtype='step', label=seed, log=True)
+plt.legend(fontsize=14)
+plt.savefig('./figs/gal%02d/allrates%s.png'%(numd*1e4, suff))
+#
+fig, ax = plt.subplots(1, 3, figsize = (12, 4))
+vmin, vmax = 0, meshes[seed][1]['pnnsat'].sum(axis=0).max()
+im = ax[0].imshow(meshes[seed][1]['pnnsat'].sum(axis=0), vmin=vmin, vmax=vmax)
+ax[0].set_title('Data')
+im = ax[1].imshow(meshes[seed][0]['predictsat'].sum(axis=0), vmin=vmin, vmax=vmax)
+ax[1].set_title('Prediction')
+im = ax[2].imshow(meshes[seed][0]['rates'].sum(axis=0), vmin=vmin, vmax=vmax)
+ax[2].set_title('Rates')
+fig.subplots_adjust(right=0.8)
+cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+fig.colorbar(im, cax=cbar_ax)
+plt.savefig('./figs/gal%02d/satpred%s.png'%(numd*1e4, suff))
 
+##
+fig, ax = plt.subplots(2, 3, figsize = (12, 8))
+seed = 100
+for n, seed in enumerate([100, 500]):
+    for i in range(6):
+        axis = ax.flatten()[i]
+        mask = np.where(meshes[seed][1]['pnnsat'] == i)
+        if i == 5: mask = np.where(meshes[seed][1]['pnnsat'] >= i)
+        rates = meshes[seed][0]['rates'] 
+        predict = meshes[seed][0]['predictsat'] 
+        axis.hist(rates[mask].flatten(), range=(-1e-3, 10), histtype='step',
+                  label=seed, log=True, color='C%d'%n, ls="--", lw=2, alpha=0.7)
+        axis.hist(predict[mask].flatten(), range=(-1e-3, 10), histtype='step',
+                  label='Count', log=True, color='C%d'%(n+4), ls="-", lw=2, alpha=0.8)
+        axis.set_title('Nsat=%d, Tot=%d'%(i, mask[0].shape[0]))
+plt.legend(fontsize=14)
+plt.savefig('./figs/gal%02d/histsat%s.png'%(numd*1e4, suff))

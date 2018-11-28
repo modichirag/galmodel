@@ -149,7 +149,7 @@ net = wide_resnet(net, 16, keep_prob=keepprob, activation_fn=tf.nn.leaky_relu)
 net = slim.conv3d(net, 1, 3, activation_fn=None)
 pred = tf.nn.sigmoid(net, name='prediction')
 #####
-loss = tf.losses.sigmoid_cross_entropy(y, net)
+loss = tf.losses.sigmoid_cross_entropy(y, net, 'loss')
 optimizer = tf.train.AdamOptimizer(learning_rate=lr, name='optimizer')
 
 opt_op = optimizer.minimize(loss, name='minimize')
