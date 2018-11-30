@@ -110,7 +110,7 @@ def readbigfile(path):
 
 
 #########################################################################################
-def fftk(shape, boxsize, symmetric=True, finite=False):
+def fftk(shape, boxsize, symmetric=True, finite=False, dtype=np.float64):
     """ return kmesh given a shape (nc, nc, nc) and boxsize 
     """
     k = []
@@ -123,7 +123,7 @@ def fftk(shape, boxsize, symmetric=True, finite=False):
         kdshape[d] = len(kd)
         kd = kd.reshape(kdshape)
 
-        k.append(kd)
+        k.append(kd.astype(dtype))
     del kd, kdshape
     return k
 

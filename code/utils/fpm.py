@@ -3,49 +3,88 @@ import numpy
 from nbodykit.lab import BigFileMesh, BigFileCatalog
 from pmesh.pm import ParticleMesh
 
-from nbodykit.cosmology import Cosmology, EHPower, Planck15
+#from nbodykit.cosmology import Cosmology, EHPower, Planck15
 from background import *
 from fpmfuncs import *
+from pmconfig import Config
+####
 
-##
-class Config(dict):
-    def __init__(self):
 
-        self['boxsize'] = 100
-        self['shift'] = 0.0
-        self['nc'] = 32
-        self['ndim'] = 3
-        self['seed'] = 100
-        self['pm_nc_factor'] = 1
-        self['resampler'] = 'cic'
-        self['cosmology'] = Planck15
-        self['powerspectrum'] = EHPower(Planck15, 0)
-        self['unitary'] = False
-        self['stages'] = numpy.linspace(0.1, 1.0, 5, endpoint=True)
-        self['aout'] = [1.0]
+def lpt1(dlin_k, q, resampler='cic'):
+    """ Run first order LPT on linear density field, returns displacements of particles
+        reading out at q. The result has the same dtype as q.
+    """
+    basepm = dlin_k.pm
 
-        local = {} # these names will be usable in the config file
-        local['EHPower'] = EHPower
-        local['Cosmology'] = Cosmology
-        local['Planck15'] = Planck15
-        local['linspace'] = numpy.linspace
-#         local['autostages'] = autostages
+    ndim = len(basepm.Nmesh)
+    delta_k = basepm.create('complex')
 
-        import nbodykit.lab as nlab
-        local['nlab'] = nlab
+    layout = basepm.decompose(q)
+    local_q = layout.exchange(q)
 
-        self.finalize()
+    source = numpy.zeros((len(q), ndim), dtype=q.dtype)
+    for d in range(len(basepm.Nmesh)):
+        disp = dlin_k.apply(laplace) \
+                    .apply(gradient(d), out=Ellipsis) \
+                    .c2r(out=Ellipsis)
+        local_disp = disp.readout(local_q, resampler=resampler)
+        source[..., d] = layout.gather(local_disp)
+    return source
 
-    def finalize(self):
-        self['aout'] = numpy.array(self['aout'])
 
-        self.pm = ParticleMesh(BoxSize=self['boxsize'], Nmesh= [self['nc']] * self['ndim'], resampler=self['resampler'], dtype='f4')
-        mask = numpy.array([ a not in self['stages'] for a in self['aout']], dtype='?')
-        missing_stages = self['aout'][mask]
-        if len(missing_stages):
-            raise ValueError('Some stages are requested for output but missing: %s' % str(missing_stages))
+def lpt2source(dlin_k):
+    """ Generate the second order LPT source term.  """
+    source = dlin_k.pm.create('real')
+    source[...] = 0
+    if dlin_k.ndim != 3: # only for 3d
+        return source.r2c(out=Ellipsis)
 
-###############
+    D1 = [1, 2, 0]
+    D2 = [2, 0, 1]
+
+    phi_ii = []
+
+    # diagnoal terms
+    for d in range(dlin_k.ndim):
+        phi_ii_d = dlin_k.apply(laplace) \
+                     .apply(gradient(d), out=Ellipsis) \
+                     .apply(gradient(d), out=Ellipsis) \
+                     .c2r(out=Ellipsis)
+        phi_ii.append(phi_ii_d)
+
+    for d in range(3):
+        source[...] += phi_ii[D1[d]].value * phi_ii[D2[d]].value
+
+    # free memory
+    phi_ii = []
+
+    phi_ij = []
+    # off-diag terms
+    for d in range(dlin_k.ndim):
+        phi_ij_d = dlin_k.apply(laplace) \
+                 .apply(gradient(D1[d]), out=Ellipsis) \
+                 .apply(gradient(D2[d]), out=Ellipsis) \
+                 .c2r(out=Ellipsis)
+
+        source[...] -= phi_ij_d[...] ** 2
+
+    # this ensures x = x0 + dx1(t) + d2(t) for 2LPT
+
+    source[...] *= 3.0 / 7
+    return source.r2c(out=Ellipsis)
+
+
+def lptz0( lineark, Q, a=1, order=2):
+    """ This computes the 'force' from LPT as well. """
+
+    DX1 = 1 * lpt1(lineark, Q)
+
+    if order == 2:
+        DX2 = 1 * lpt1(lpt2source(lineark), Q)
+    else:
+        DX2 = 0
+    return DX1 + DX2
+
 
 
 ###############
@@ -68,6 +107,16 @@ class StateVector(object):
         self.F = numpy.zeros_like(self.Q)
         self.RHO = numpy.zeros_like(self.Q[..., 0])
         self.a = dict(S=None, P=None, F=None)
+
+    def copy(self):
+        obj = object.__new__(type(self))
+        od = obj.__dict__
+        od.update(self.__dict__)
+        obj.S = self.S.copy()
+        obj.P = self.P.copy()
+        obj.F = self.F.copy()
+        obj.RHO = self.RHO.copy()
+        return obj
 
     @property
     def X(self):
@@ -145,7 +194,6 @@ class Solver(object):
     
 
 
-
 class FastPMStep(object):
     def __init__(self, solver):
         self.cosmology = solver.cosmology
@@ -192,6 +240,36 @@ class FastPMStep(object):
         state.F[...] = layout.gather(longrange(X1, delta_k, split=0, factor=1.5 * self.cosmology.Om0))
         state.a['F'] = af
         return dict(delta_k=delta_k)
+
+
+
+def leapfrog(stages):
+    """ Generate a leap frog stepping scheme.
+        Parameters
+        ----------
+        stages : array_like
+            Time (a) where force computing stage is requested.
+    """
+    if len(stages) == 0:
+        return
+
+    ai = stages[0]
+    # first force calculation for jump starting
+    yield 'F', ai, ai, ai
+    x, p, f = ai, ai, ai
+
+    for i in range(len(stages) - 1):
+        a0 = stages[i]
+        a1 = stages[i + 1]
+        ah = (a0 * a1) ** 0.5
+        yield 'K', p, f, ah
+        p = ah
+        yield 'D', x, p, a1
+        x = a1
+        yield 'F', f, x, a1
+        f = a1
+        yield 'K', p, f, a1
+        p = a1
 
 
 

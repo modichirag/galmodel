@@ -74,8 +74,8 @@ def cic_readout(mesh, part, cube_size=None):
     return value
 
 
-def tflaplace(gdict):
-    kvec = gdict['kvec']
+def tflaplace(config):
+    kvec = config['kvec']
     kk = sum(ki**2 for ki in kvec)
     mask = (kk == 0).nonzero()
     kk[mask] = 1
@@ -88,9 +88,9 @@ def tflaplace(gdict):
 #     return b 
 
 
-def tfgradient(gdict, dir):
-    kvec = gdict['kvec']
-    bs, nc = gdict['bs'], gdict['nc']
+def tfgradient(config, dir):
+    kvec = config['kvec']
+    bs, nc = config['boxsize'], config['nc']
     cellsize = bs/nc
     w = kvec[dir] * cellsize
     a = 1 / (6.0 * cellsize) * (8 * numpy.sin(w) - numpy.sin(2 * w))
@@ -101,29 +101,30 @@ def tfgradient(gdict, dir):
     
 
 
-def tffknlongrange(gdict, r_split):
-    kk = sum(ki ** 2 for ki in gdict['kvec'])
+def tffknlongrange(config, r_split):
+    kk = sum(ki ** 2 for ki in config['kvec'])
     if r_split != 0:
         return numpy.exp(-kk * r_split**2)
     else:
         return np.ones_like(kk)
 
-def tflongrange(gdict, x, delta_k, split=0, factor=1):
+def tflongrange(config, x, delta_k, split=0, factor=1):
     """ like long range, but x is a list of positions """
     # use the four point kernel to suppresse artificial growth of noise like terms
 
     ndim = 3
-    lap = tflaplace(gdict)
-    fknlrange = tffknlongrange(gdict, split)
+    lap = tflaplace(config)
+    fknlrange = tffknlongrange(config, split)
     kweight = lap * fknlrange    
     pot_k = tf.multiply(delta_k, kweight)
 
     var = tf.Variable(0, dtype=tf.float32)
     f = []
     for d in range(ndim):
-        force_dc = tf.multiply(pot_k, tfgradient(gdict, d))
-        forced = tf.multiply(tf.spectral.irfft3d(force_dc), gdict['nc']**3)
-        f.append(cic_readout(forced, x))
+        force_dc = tf.multiply(pot_k, tfgradient(config, d))
+        forced = tf.multiply(tf.spectral.irfft3d(force_dc), config['nc']**3)
+        force = cic_readout(forced, x)
+        f.append(force)
     
     f = tf.stack(f, axis=1)
     f = tf.multiply(f, factor)
@@ -131,13 +132,10 @@ def tflongrange(gdict, x, delta_k, split=0, factor=1):
 
 
 
-
-
-
-    
+   
 #
-#def tflaplace(v, gdict):
-#    kvec = gdict['kvec']
+#def tflaplace(v, config):
+#    kvec = config['kvec']
 #    kk = sum(ki**2 for ki in kvec)
 #    mask = (kk == 0).nonzero()
 #    kk[mask] = 1
@@ -147,9 +145,9 @@ def tflongrange(gdict, x, delta_k, split=0, factor=1):
 #    return b 
 #
 #
-#def tfgradient(v, dir, gdict):
-#    kvec = gdict['kvec']
-#    bs, nc = gdict['bs'], gdict['nc']
+#def tfgradient(v, dir, config):
+#    kvec = config['kvec']
+#    bs, nc = config['boxsize'], config['nc']
 #    cellsize = bs/nc
 #    w = kvec[dir] * cellsize
 #    a = 1 / (6.0 * cellsize) * (8 * numpy.sin(w) - numpy.sin(2 * w))
