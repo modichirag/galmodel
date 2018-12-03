@@ -9,9 +9,9 @@ from nbodykit.cosmology import Cosmology, EHPower, Planck15
 class Config(dict):
     def __init__(self):
 
-        self['boxsize'] = 400
+        self['boxsize'] = 40
         self['shift'] = 0.0
-        self['nc'] = 128
+        self['nc'] = 8
         self['ndim'] = 3
         self['seed'] = 100
         self['pm_nc_factor'] = 1

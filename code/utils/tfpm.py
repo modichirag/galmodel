@@ -5,7 +5,7 @@ import tensorflow as tf
 from tfpmfuncs import *
 from background import *
 
-def tflpt1(dlin_k, pos, config):
+def rtflpt1(dlin_k, pos, config):
     """ Run first order LPT on linear density field, returns displacements of particles
         reading out at q. The result has the same dtype as q.
     """
@@ -25,8 +25,28 @@ def tflpt1(dlin_k, pos, config):
     return tf.stack(displacement, axis=1)
 
 
+def tflpt1(dlin_k, pos, config):
+    """ Run first order LPT on linear density field, returns displacements of particles
+        reading out at q. The result has the same dtype as q.
+    """
+    bs, nc = config['boxsize'], config['nc']    
+    #ones = tf.ones_like(dlin_k)
+    lap = tflaplace(config)
+    
+    displacement = tf.zeros_like(pos)
+    displacement = []
+    for d in range(3):
+        #kweight = tf.multiply(tfgradient(config, d), lap)
+        kweight = tfgradient(config, d) * lap
+        dispc = tf.multiply(kweight, dlin_k)
+        disp = tf.multiply(tf.cast(tf.spectral.ifft3d(dispc), tf.float32), nc**3)
+        displacement.append(cic_readout(disp, pos))
 
-def tflpt2source(dlin_k, config):
+    return tf.stack(displacement, axis=1)
+
+
+
+def rtflpt2source(dlin_k, config):
     """ Generate the second order LPT source term.  """
 
     bs, nc = config['boxsize'], config['nc']
@@ -60,10 +80,53 @@ def tflpt2source(dlin_k, config):
         kweight = gradi * gradj * lap
         phic = tf.multiply(kweight, dlin_k)
         phi = tf.multiply(tf.spectral.irfft3d(phic), nc**3)
+        tf.multiply(tf.spectral.irfft3d(phic), nc**3)
         source = tf.subtract(source, tf.multiply(phi, phi))
 
     source = tf.multiply(source, 3.0/7.)
     return tf.multiply(tf.spectral.rfft3d(source), 1/nc**3)
+
+
+
+
+def tflpt2source(dlin_k, config):
+    """ Generate the second order LPT source term.  """
+
+    bs, nc = config['boxsize'], config['nc']
+    source = tf.zeros((nc, nc, nc))
+    
+    D1 = [1, 2, 0]
+    D2 = [2, 0, 1]
+
+    phi_ii = []
+
+    # diagnoal terms
+    lap = tflaplace(config)
+    
+    for d in range(3):
+        grad = tfgradient(config, d) 
+        kweight = grad * grad * lap
+        phic = tf.multiply(kweight, dlin_k)
+        phi_ii.append(tf.multiply(tf.cast(tf.spectral.ifft3d(phic), tf.float32), nc**3))
+
+
+    for d in range(3):
+        source = tf.add(source, tf.multiply(phi_ii[D1[d]], phi_ii[D2[d]]))
+    
+#     return source
+    # free memory
+    phi_ii = []
+    # off-diag terms
+    for d in range(3):
+        gradi = tfgradient(config, D1[d])
+        gradj = tfgradient(config, D2[d])
+        kweight = gradi * gradj * lap
+        phic = tf.multiply(kweight, dlin_k)
+        phi = tf.multiply(tf.cast(tf.spectral.ifft3d(phic), tf.float32), nc**3)
+        source = tf.subtract(source, tf.multiply(phi, phi))
+
+    source = tf.multiply(source, 3.0/7.)
+    return tf.multiply(tf.spectral.fft3d(tf.cast(source, tf.complex64)), 1/nc**3)
 
 
 def tflptz0(lineark, Q, config, a=1, order=2):
@@ -111,8 +174,17 @@ def tfKick(state, ai, ac, af, config, dtype=np.float32):
     var = tf.assign(var, state, validate_shape=False)
     pt = PerturbationGrowth(config['cosmology'], a=[ai, ac, af], a_normalize=1.0)
     fac = 1 / (ac ** 2 * pt.E(ac)) * (pt.Gf(af) - pt.Gf(ai)) / pt.gf(ac)
+    indices = tf.constant([0])
+    indices = tf.constant([512])
+    #indices = tf.constant([[[0]]])
     update = tf.multiply(dtype(fac), state[2])
-    var = tf.scatter_add(var, 1, update)
+    shape = tf.constant([3, 512, 3])#var.shape
+    print(indices)
+    print(update)
+    print(shape)
+    update = tf.scatter_nd(indices, update, shape)
+    var = tf.add(var, update)
+    #var = tf.scatter_add(var, 1, update)
     return var
 
 

@@ -4,19 +4,18 @@ import numpy
 import tensorflow as tf
 
 
+
 def cic_paint(mesh, part, weight=None, cube_size=None):
     """
-        - mesh is a cube
+        - mesh is a cube of format tf.Variable
         - part is a list of particles (:, 3), positions in mesh units
         - weight is a list of weights (:)
         - cube_size is the size of the cube in mesh units
     """
 
-    # Create a variable to store the input mesh
-    var = tf.Variable(0, dtype=tf.float32)
-    var = tf.assign(var, mesh, validate_shape=False)
     if weight is None: weight = np.ones(part.shape[0], dtype=part.dtype)
     if cube_size is None: cube_size = mesh.shape[0].value
+    nc = int(cube_size)
     
     # Extract the indices of all the mesh points affected by each particles
     i000 = tf.cast(tf.floor(part), dtype=tf.int32)
@@ -31,14 +30,14 @@ def cic_paint(mesh, part, weight=None, cube_size=None):
                                  i110, i101, i011, i111], axis=1)
     kernel = 1. - tf.abs(tf.expand_dims(part, axis=1) - tf.cast(neighboor_coords, tf.float32))
     kernel = tf.reduce_prod(kernel, axis=-1, keepdims=False)
-    kernel = tf.expand_dims(weight, axis=1) * kernel
+    kernel = tf.multiply(tf.expand_dims(weight, axis=1) , kernel)
         
-#     if cube_size is not None:
     neighboor_coords = neighboor_coords % cube_size
 
-    updated_mesh = tf.scatter_nd_add(var, tf.reshape(neighboor_coords, (-1, 3)),
-                                     tf.reshape(kernel, (-1,)))
-    return updated_mesh
+    update = tf.scatter_nd(neighboor_coords, kernel, [nc, nc, nc])
+    mesh = tf.add(mesh, update)
+    return mesh
+
 
 
 
@@ -69,7 +68,7 @@ def cic_readout(mesh, part, cube_size=None):
     neighboor_coords = neighboor_coords % cube_size
 
     meshvals = tf.gather_nd(mesh, neighboor_coords)
-    weightedvals = tf.multiply(meshvals, kernel)
+    weightedvals = tf.multiply(meshvals, tf.cast(kernel, meshvals.dtype))
     value = tf.reduce_sum(weightedvals, axis=1)
     return value
 
