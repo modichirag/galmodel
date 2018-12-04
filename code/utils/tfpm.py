@@ -169,39 +169,49 @@ def tflptinit(lineark, Q, a, config, order=2):
 
 
 
+
 def tfKick(state, ai, ac, af, config, dtype=np.float32):
-    var = tf.Variable(0, dtype=tf.float32)
-    var = tf.assign(var, state, validate_shape=False)
     pt = PerturbationGrowth(config['cosmology'], a=[ai, ac, af], a_normalize=1.0)
     fac = 1 / (ac ** 2 * pt.E(ac)) * (pt.Gf(af) - pt.Gf(ai)) / pt.gf(ac)
-    indices = tf.constant([0])
-    indices = tf.constant([512])
-    #indices = tf.constant([[[0]]])
-    update = tf.multiply(dtype(fac), state[2])
-    shape = tf.constant([3, 512, 3])#var.shape
-    print(indices)
-    print(update)
-    print(shape)
+    indices = tf.constant([[1]])
+    update = tf.expand_dims(tf.multiply(dtype(fac), state[2]), axis=0)
+    shape = state.shape
+#    print('indices = ', indices)
+#    print('update = ', update)
+#    print('shape = ', shape)
     update = tf.scatter_nd(indices, update, shape)
-    var = tf.add(var, update)
-    #var = tf.scatter_add(var, 1, update)
-    return var
-
+    state = tf.add(state, update)
+    return state
 
 def tfDrift(state, ai, ac, af, config, dtype=np.float32):
-    var = tf.Variable(0, dtype=tf.float32)
-    var = tf.assign(var, state, validate_shape=False)
     pt = PerturbationGrowth(config['cosmology'], a=[ai, ac, af], a_normalize=1.0)
     fac = 1 / (ac ** 3 * pt.E(ac)) * (pt.Gp(af) - pt.Gp(ai)) / pt.gp(ac)
-    update = tf.multiply(dtype(fac), state[1])
-    var = tf.scatter_add(var, 0, update)
-    return var
+    indices = tf.constant([[0]])
+    update = tf.expand_dims(tf.multiply(dtype(fac), state[1]), axis=0)
+    shape = state.shape
+    update = tf.scatter_nd(indices, update, shape)
+    state = tf.add(state, update)
+    return state
 
-    
 
+#def tfForce(state, ai, ac, af, config, dtype=np.float32):
+#    var = tf.Variable(0, dtype=tf.float32)
+#    var = tf.assign(var, state, validate_shape=False)
+#
+#    bs, nc = config['boxsize'], config['nc']
+#    rho = tf.zeros((nc, nc, nc))
+#    wts = np.ones(nc**3).astype(np.float32)
+#    nbar = nc**3/bs**3
+#
+#    rho = cic_paint(rho, tf.multiply(state[0], nc/bs), wts)
+#    #rho = tf.multiply(rho, 1/nbar) # I am not sure why this is not needed here
+#    delta_k = tf.multiply(tf.spectral.fft3d(tf.cast(rho, tf.complex64)), 1/nc**3)
+#    fac = dtype(1.5 * config['cosmology'].Om0)
+#    update = tflongrange(config, tf.multiply(state[0], nc/bs), delta_k, split=0, factor=fac)
+#    var = tf.scatter_update(var, 2, update)
+#    return var
+#
 def tfForce(state, ai, ac, af, config, dtype=np.float32):
-    var = tf.Variable(0, dtype=tf.float32)
-    var = tf.assign(var, state, validate_shape=False)
 
     bs, nc = config['boxsize'], config['nc']
     rho = tf.zeros((nc, nc, nc))
@@ -209,13 +219,63 @@ def tfForce(state, ai, ac, af, config, dtype=np.float32):
     nbar = nc**3/bs**3
 
     rho = cic_paint(rho, tf.multiply(state[0], nc/bs), wts)
-    #rho = tf.multiply(rho, 1/nbar) # I am not sure why this is not needed here
-    delta_k = tf.multiply(tf.spectral.rfft3d(rho), 1/nc**3)
+    ##rho = tf.multiply(rho, 1/nbar)  ###I am not sure why this is not needed here
+    delta_k = tf.multiply(tf.spectral.fft3d(tf.cast(rho, tf.complex64)), 1/nc**3)
     fac = dtype(1.5 * config['cosmology'].Om0)
     update = tflongrange(config, tf.multiply(state[0], nc/bs), delta_k, split=0, factor=fac)
-    var = tf.scatter_update(var, 2, update)
-    return var
+    
 
+    update = tf.expand_dims(update, axis=0)
+
+    indices = tf.constant([[2]])
+    shape = state.shape
+    update = tf.scatter_nd(indices, update, shape)
+    mask = tf.stack((tf.ones_like(state[0]), tf.ones_like(state[0]), tf.zeros_like(state[0])), axis=0)
+    state = tf.multiply(state, mask)
+    state = tf.add(state, update)
+    return state
+
+
+#def tfKick(X, P, F, ai, ac, af, config, dtype=np.float32):
+#    #var = tf.Variable(0, dtype=tf.float32)
+#    #var = tf.assign(var, P, validate_shape=False)
+#    pt = PerturbationGrowth(config['cosmology'], a=[ai, ac, af], a_normalize=1.0)
+#    fac = 1 / (ac ** 2 * pt.E(ac)) * (pt.Gf(af) - pt.Gf(ai)) / pt.gf(ac)
+#    update = tf.multiply(dtype(fac), F)
+#    P = tf.add(P, update)
+#    #var = tf.scatter_add(var, 1, update)
+#    return X, P, F
+#
+#
+#def tfDrift(X, P, F, ai, ac, af, config, dtype=np.float32):
+#    #var = tf.Variable(0, dtype=tf.float32)
+#    #var = tf.assign(var, state, validate_shape=False)
+#    pt = PerturbationGrowth(config['cosmology'], a=[ai, ac, af], a_normalize=1.0)
+#    fac = 1 / (ac ** 3 * pt.E(ac)) * (pt.Gp(af) - pt.Gp(ai)) / pt.gp(ac)
+#    update = tf.multiply(dtype(fac), P)
+#    #var = tf.scatter_add(var, 0, update)
+#    X = tf.add(X, update)
+#    return X, P, F
+#
+#    
+#
+#def tfForce(X, P, F, ai, ac, af, config, dtype=np.float32):
+#    #var = tf.Variable(0, dtype=tf.float32)
+#    #var = tf.assign(var, state, validate_shape=False)
+#
+#    bs, nc = config['boxsize'], config['nc']
+#    rho = tf.zeros((nc, nc, nc))
+#    wts = np.ones(nc**3).astype(np.float32)
+#    nbar = nc**3/bs**3
+#
+#    rho = cic_paint(rho, tf.multiply(X, nc/bs), wts)
+#    #rho = tf.multiply(rho, 1/nbar) # I am not sure why this is not needed here
+#    delta_k = tf.multiply(tf.spectral.rfft3d(rho), 1/nc**3)
+#    fac = dtype(1.5 * config['cosmology'].Om0)
+#    F = tflongrange(config, tf.multiply(X, nc/bs), delta_k, split=0, factor=fac)
+#    return X, P, F
+#
+#
 
 def leapfrog(stages):
     """ Generate a leap frog stepping scheme.
@@ -246,12 +306,15 @@ def leapfrog(stages):
         p = a1
 
 
-def tfnbody(state, config):
+def tfnbody(state, config, verbose=False):
     stepping = leapfrog(config['stages'])
     actions = {'F':tfForce, 'K':tfKick, 'D':tfDrift}
+    
     for action, ai, ac, af in stepping:
-        print(action, ai, ac, af)
+        if verbose: print(action, ai, ac, af)
         state = actions[action](state, ai, ac, af, config)
     return state
+        #X, P, F = actions[action](X, P, F, ai, ac, af, config)
+    #return X, P, F
 
 

@@ -117,11 +117,12 @@ def tflongrange(config, x, delta_k, split=0, factor=1):
     kweight = lap * fknlrange    
     pot_k = tf.multiply(delta_k, kweight)
 
-    var = tf.Variable(0, dtype=tf.float32)
+    #var = tf.Variable(0, dtype=tf.float32)
     f = []
     for d in range(ndim):
         force_dc = tf.multiply(pot_k, tfgradient(config, d))
-        forced = tf.multiply(tf.spectral.irfft3d(force_dc), config['nc']**3)
+        #forced = tf.multiply(tf.spectral.irfft3d(force_dc), config['nc']**3)
+        forced = tf.multiply(tf.cast(tf.spectral.ifft3d(force_dc), tf.float32), config['nc']**3)
         force = cic_readout(forced, x)
         f.append(force)
     
