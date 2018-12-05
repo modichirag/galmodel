@@ -5,17 +5,50 @@ import tensorflow as tf
 
 
 
-def cic_paint(mesh, part, weight=None, cube_size=None):
+
+def r2c3d(rfield, config, dtype=tf.complex64):
+    nc = config['nc']
+    cfield = tf.multiply(tf.spectral.fft3d(tf.cast(rfield, dtype)), 1/config['nc']**3)
+    return cfield
+
+
+def c2r3d(cfield, config, dtype=tf.float32):
+    nc = config['nc']
+    rfield = tf.multiply(tf.cast(tf.spectral.ifft3d(cfield), dtype), config['nc']**3)
+    return rfield
+    
+
+def fftk(shape, boxsize, symmetric=True, finite=False, dtype=np.float64):
+    """ return k_vector given a shape (nc, nc, nc) and boxsize
+    """
+    k = []
+    for d in range(len(shape)):
+        kd = numpy.fft.fftfreq(shape[d])
+        kd *= 2 * numpy.pi / boxsize * shape[d]
+        kdshape = numpy.ones(len(shape), dtype='int')
+        if symmetric and d == len(shape) -1:
+            kd = kd[:shape[d]//2 + 1]
+        kdshape[d] = len(kd)
+        kd = kd.reshape(kdshape)
+        
+        k.append(kd.astype(dtype))
+    del kd, kdshape
+    return k
+
+def cic_paint(mesh, part, weight=None, cube_size=None, boxsize=None):
     """
         - mesh is a cube of format tf.Variable
-        - part is a list of particles (:, 3), positions in mesh units
+        - part is a list of particles (:, 3), positions assumed to be in 
+    mesh units if boxsize is None
         - weight is a list of weights (:)
         - cube_size is the size of the cube in mesh units
     """
 
-    if weight is None: weight = np.ones(part.shape[0], dtype=part.dtype)
+    if weight is None: weight = np.ones(part.shape[0].value, dtype=part.dtype)
     if cube_size is None: cube_size = mesh.shape[0].value
     nc = int(cube_size)
+    if boxsize is not None:
+        part = tf.multiply(part, nc/boxsize)
     
     # Extract the indices of all the mesh points affected by each particles
     i000 = tf.cast(tf.floor(part), dtype=tf.int32)
