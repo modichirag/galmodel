@@ -16,7 +16,7 @@ from tfpmconfig import Config
 
 #Generate DATA
 
-bs, nc = 100, 32
+bs, nc = 400, 128
 seed = 100
 ofolder = './recon/L%04d_N%04d_S%04d/'%(bs, nc, seed)
 try: os.makedirs(ofolder)
@@ -59,12 +59,12 @@ fnstate = tfpm.nbody(icstate, config, verbose=False)
 final = tf.zeros_like(linear)
 final = tfpf.cic_paint(final, fnstate[0], boxsize=bs)
 #
-priormesh = tf.multiply(lineark, priorwt)
-prior = tf.norm(priormesh)
-prior = tf.cast(prior, tf.float32)
+priormesh = tf.square(tf.cast(tf.abs(lineark), tf.float32))
+prior = tf.reduce_sum(tf.multiply(priormesh, priorwt))
 prior = tf.multiply(prior, 1/nc**3)
 
-chisq = tf.losses.mean_squared_error(final, data, weights=1/0.1)
+sigmasq = 0.01
+chisq = tf.losses.mean_squared_error(final, data, weights=1/sigmasq)
 loss = tf.add(chisq, prior)
 
 #Optimize
@@ -76,7 +76,7 @@ opt_op = optimizer.minimize(loss, var_list=[linear])
 niter = 10000
 lr0 = 50
 nlr, lrfac = 2000, 2
-nprint = 1000
+nprint = 100
 
 
 with tf.Session() as sess:

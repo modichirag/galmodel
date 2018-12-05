@@ -34,6 +34,7 @@ def fftk(shape, boxsize, symmetric=True, finite=False, dtype=np.float64):
     return k
 
 
+
 def cic_paint(mesh, part, weight=None, cube_size=None, boxsize=None):
     """
         - mesh is a cube of format tf.Variable
@@ -43,35 +44,26 @@ def cic_paint(mesh, part, weight=None, cube_size=None, boxsize=None):
         - cube_size is the size of the cube in mesh units
     """
 
-    if weight is None: weight = tf.ones(part.shape[0].value, dtype=part.dtype)
-    if cube_size is None: cube_size = mesh.shape[0].value
-    nc = int(cube_size)
+    if cube_size is None: cube_size = int(mesh.shape[0].value)
     if boxsize is not None:
-        part = tf.multiply(part, nc/boxsize)
+        part = tf.multiply(part, cube_size/boxsize)
     
     # Extract the indices of all the mesh points affected by each particles
-    i000 = tf.cast(tf.floor(part), dtype=tf.int32)
-    i100 = i000 + tf.constant([1, 0, 0])
-    i010 = i000 + tf.constant([0, 1, 0])
-    i001 = i000 + tf.constant([0, 0, 1])
-    i110 = i000 + tf.constant([1, 1, 0])
-    i101 = i000 + tf.constant([1, 0, 1])
-    i011 = i000 + tf.constant([0, 1, 1])
-    i111 = i000 + tf.constant([1, 1, 1])
-    neighboor_coords = tf.stack([i000, i100, i010, i001,
-                                 i110, i101, i011, i111], axis=1)
-    kernel = 1. - tf.abs(tf.expand_dims(part, axis=1) - tf.cast(neighboor_coords, tf.float32))
-    kernel = tf.reduce_prod(kernel, axis=-1, keepdims=False)
-    kernel = tf.multiply(tf.expand_dims(weight, axis=1) , kernel)
-        
-    neighboor_coords = neighboor_coords % cube_size
+    part = tf.expand_dims(part, 1)
+    floor = tf.floor(part)
+    connection = tf.constant([[[0, 0, 0], [1., 0, 0],[0., 1, 0],[0., 0, 1],[1., 1, 0],[1., 0, 1],[0., 1, 1],[1., 1, 1]]])
+    neighboor_coords = tf.add(floor, connection)    
 
-    update = tf.scatter_nd(neighboor_coords, kernel, [nc, nc, nc])
+    kernel = 1. - tf.abs(part - neighboor_coords)
+    kernel = tf.reduce_prod(kernel, axis=-1, keepdims=False)
+    if weight is not None: kernel = tf.multiply(tf.expand_dims(weight, axis=1) , kernel)
+
+    neighboor_coords = tf.cast(neighboor_coords, tf.int32) 
+    neighboor_coords = tf.mod(neighboor_coords , cube_size)
+
+    update = tf.scatter_nd(neighboor_coords, kernel, [cube_size, cube_size, cube_size])
     mesh = tf.add(mesh, update)
     return mesh
-
-
-
 
 
 def cic_readout(mesh, part, cube_size=None, boxsize=None):
@@ -82,30 +74,25 @@ def cic_readout(mesh, part, cube_size=None, boxsize=None):
         - cube_size is the size of the cube in mesh units
     """
 
-    if cube_size is None: cube_size = mesh.shape[0].value
-    nc = int(cube_size)
+    if cube_size is None: cube_size = int(mesh.shape[0].value)
     if boxsize is not None:
-        part = tf.multiply(part, nc/boxsize)
+        part = tf.multiply(part, cube_size/boxsize)
 
     # Extract the indices of all the mesh points affected by each particles
-    i000 = tf.cast(tf.floor(part), dtype=tf.int32)
-    i100 = i000 + tf.constant([1, 0, 0])
-    i010 = i000 + tf.constant([0, 1, 0])
-    i001 = i000 + tf.constant([0, 0, 1])
-    i110 = i000 + tf.constant([1, 1, 0])
-    i101 = i000 + tf.constant([1, 0, 1])
-    i011 = i000 + tf.constant([0, 1, 1])
-    i111 = i000 + tf.constant([1, 1, 1])
-    neighboor_coords = tf.stack([i000, i100, i010, i001,
-                                 i110, i101, i011, i111], axis=1)
-    kernel = 1. - tf.abs(tf.expand_dims(part, axis=1) - tf.cast(neighboor_coords, tf.float32))
+    part = tf.expand_dims(part, 1)
+    floor = tf.floor(part)
+    connection = tf.constant([[[0, 0, 0], [1., 0, 0],[0., 1, 0],[0., 0, 1],[1., 1, 0],[1., 0, 1],[0., 1, 1],[1., 1, 1]]])
+    neighboor_coords = tf.add(floor, connection)
+
+    kernel = 1. - tf.abs(part - neighboor_coords)
     kernel = tf.reduce_prod(kernel, axis=-1, keepdims=False)
     
 #     if cube_size is not None:
-    neighboor_coords = neighboor_coords % cube_size
+    neighboor_coords = tf.cast(neighboor_coords, tf.int32) 
+    neighboor_coords = tf.mod(neighboor_coords , cube_size)
 
     meshvals = tf.gather_nd(mesh, neighboor_coords)
-    weightedvals = tf.multiply(meshvals, tf.cast(kernel, meshvals.dtype))
+    weightedvals = tf.multiply(meshvals, kernel)
     value = tf.reduce_sum(weightedvals, axis=1)
     return value
 
@@ -121,6 +108,7 @@ def laplace(config):
     return wts
 
 
+
 def gradient(config, dir):
     kvec = config['kvec']
     bs, nc = config['boxsize'], config['nc']
@@ -133,11 +121,12 @@ def gradient(config, dir):
 
 
 def kernellongrange(config, r_split):
-    kk = sum(ki ** 2 for ki in config['kvec'])
     if r_split != 0:
+        kk = sum(ki ** 2 for ki in config['kvec'])
         return numpy.exp(-kk * r_split**2)
     else:
-        return np.ones_like(kk)
+        return 1.
+
 
 def longrange(config, x, delta_k, split=0, factor=1):
     """ like long range, but x is a list of positions """
@@ -149,7 +138,6 @@ def longrange(config, x, delta_k, split=0, factor=1):
     kweight = lap * fknlrange    
     pot_k = tf.multiply(delta_k, kweight)
 
-    #var = tf.Variable(0, dtype=tf.float32)
     f = []
     for d in range(ndim):
         force_dc = tf.multiply(pot_k, gradient(config, d))
