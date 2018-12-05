@@ -131,7 +131,7 @@ class Perturbation:
 
     def Gf(self, a):
         """
-        FastPM growth factor function, eq, 20
+        FastPM growth factor function, eq, 20 # 
         """
         return self.D1(a, 1) * a ** 2 * self.E(a)
 
@@ -206,13 +206,14 @@ class Perturbation:
         v2 /= v2[ind][0]
         return v1, v2
 
+
+
+
 class MatterDominated(Perturbation):
     """
 
     Perturbation with matter dominated initial condition.
-
     This is usually referred to the single fluid approximation as well.
-
     The result here is accurate upto numerical precision. If Omega0_m 
 
     Parameters
@@ -230,15 +231,26 @@ class MatterDominated(Perturbation):
         a list of time steps where the factors are exact.
         other a values are interpolated.
     """
-    def __init__(self, Omega0_m, Omega0_lambda=None, Omega0_k=0, a=None, a_normalize=1.0):
-        if Omega0_lambda is None:
-            Omega0_lambda = 1 - Omega0_k - Omega0_m
+    def __init__(self, cosmo=None, Omega0_m=None, Omega0_lambda=None, Omega0_k=0, a=None, a_normalize=1.0):
 
-        self.Omega0_lambda = Omega0_lambda
-        self.Omega0_m = Omega0_m
-        self.Omega0_k = Omega0_k
-        # Om0 is added for backward compatiblity
-        self.Om0 = Omega0_m
+        if cosmo is None and Omega0_m is None:
+            print("Need cosmology object (cosmo) or Matter density (Omega0_m)")
+            return None
+
+        if cosmo is not None:   # 
+            self.Omega0_lambda = cosmo.Ode0
+            self.Omega0_m = cosmo.Om0
+            self.Omega0_k = cosmo.Ok0
+            self.Om0 = cosmo.Om0
+
+        else:
+            if Omega0_lambda is None: self.Omega0_lambda = 1 - Omega0_k - Omega0_m
+            else: self.Omega0_lambda = Omega0_lambda
+            self.Omega0_m = Omega0_m
+            self.Omega0_k = Omega0_k
+            self.Om0 = Omega0_m
+
+            
         Perturbation.__init__(self, a, a_normalize)
 
     def get_initial_condition(self):
@@ -256,6 +268,9 @@ class MatterDominated(Perturbation):
 
     def Om(self, a):
         return (self.Omega0_m / a ** 3) / self.efunc(a) ** 2
+
+
+
 
 class RadiationDominated(Perturbation):
     """
@@ -285,6 +300,8 @@ class RadiationDominated(Perturbation):
 
         self._cosmo = cosmo
         self.Omega0_m = cosmo.Om0
+        self.Omega0_b = cosmo.Ob0
+        self.Omega_b = cosmo.Ob
 
         # Om0 is added for backward compatiblity
         self.Om0 = self.Omega0_m
@@ -324,5 +341,6 @@ class RadiationDominated(Perturbation):
         return self._cosmo.Omega_b(z) + self._cosmo.Omega_cdm(z) # non-relativistic 
 
 
-PerturbationGrowth = RadiationDominated
+#PerturbationGrowth = RadiationDominated
+PerturbationGrowth = MatterDominated
 
