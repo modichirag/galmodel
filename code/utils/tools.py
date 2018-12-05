@@ -111,7 +111,7 @@ def readbigfile(path):
 
 #########################################################################################
 def fftk(shape, boxsize, symmetric=True, finite=False, dtype=np.float64):
-    """ return kmesh given a shape (nc, nc, nc) and boxsize 
+    """ return kvector given a shape (nc, nc, nc) and boxsize 
     """
     k = []
     for d in range(len(shape)):
@@ -217,6 +217,7 @@ def power(f1, f2=None, boxsize=1.0, k = None):
     del c2
     if k is None:
         k = fftk(f1.shape, boxsize)
+        k = sum(kk**2 for kk in k)**0.5
     H, edges = numpy.histogram(k.flat, weights=x.flat, bins=f1.shape[0]) 
     N, edges = numpy.histogram(k.flat, bins=edges)
     center= edges[1:] + edges[:-1]
