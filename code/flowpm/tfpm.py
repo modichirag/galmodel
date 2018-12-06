@@ -18,7 +18,7 @@ def linfield(config, seed=100):
     white = tf.random_normal(shape=(nc, nc, nc), mean=0, stddev=1.0, seed=seed)
     whitec = tf.multiply(tf.spectral.fft3d(tf.cast(white, tf.complex64)), 1/nc**1.5)
     lineark = tf.multiply(tf.multiply(whitec, pkmesh**0.5), 1/bs**1.5)
-    linear = tf.multiply(tf.cast(tf.spectral.ifft3d(lineark), tf.float32), nc**3)
+    linear = c2r3d(lineark, norm=nc**3)
     return linear
 
 
@@ -34,10 +34,9 @@ def lpt1(dlin_k, pos, config):
     displacement = tf.zeros_like(pos)
     displacement = []
     for d in range(3):
-        #kweight = tf.multiply(gradient(config, d), lap)
         kweight = gradient(config, d) * lap
         dispc = tf.multiply(kweight, dlin_k)
-        disp = tf.multiply(tf.cast(tf.spectral.ifft3d(dispc), tf.float32), nc**3)
+        disp = c2r3d(dispc, norm=nc**3)
         displacement.append(cic_readout(disp, pos, boxsize=bs))
 
     return tf.stack(displacement, axis=1)
@@ -63,7 +62,7 @@ def lpt2source(dlin_k, config):
         grad = gradient(config, d) 
         kweight = grad * grad * lap
         phic = tf.multiply(kweight, dlin_k)
-        phi_ii.append(tf.multiply(tf.cast(tf.spectral.ifft3d(phic), tf.float32), nc**3))
+        phi_ii.append(c2r3d(phic, norm=nc**3))
 
 
     for d in range(3):
@@ -78,11 +77,11 @@ def lpt2source(dlin_k, config):
         gradj = gradient(config, D2[d])
         kweight = gradi * gradj * lap
         phic = tf.multiply(kweight, dlin_k)
-        phi = tf.multiply(tf.cast(tf.spectral.ifft3d(phic), tf.float32), nc**3)
+        phi = c2r3d(phic, norm=nc**3)
         source = tf.subtract(source, tf.multiply(phi, phi))
 
     source = tf.multiply(source, 3.0/7.)
-    return tf.multiply(tf.spectral.fft3d(tf.cast(source, tf.complex64)), 1/nc**3)
+    return r2c3d(source, norm=nc**3)
 
 
 def lptz0(lineark, Q, config, a=1, order=2):
@@ -100,30 +99,31 @@ def lptz0(lineark, Q, config, a=1, order=2):
 # NBODY
 
 
-def lptinit(lineark, Q, config, a0=None, order=2):
-        """ Estimate the initial LPT displacement given an input linear (complex) field """
-        assert order in (1, 2)
+def lptinit(linear, Q, config, a0=None, order=2):
+    """ Estimate the initial LPT displacement given an input linear (real) field """
+    assert order in (1, 2)
 
-        bs, nc = config['boxsize'], config['nc']
-        pos = Q 
-        dtype = np.float32
-        if a0 is None: a0 = config['stages'][0]
-        a = a0
-        
-        pt = PerturbationGrowth(config['cosmology'], a=[a], a_normalize=1.0)
-        DX = tf.multiply(dtype(pt.D1(a)) , lpt1(lineark, pos, config)) 
-        P = tf.multiply(dtype(a ** 2 * pt.f1(a) * pt.E(a)) , DX)
-        F = tf.multiply(dtype(a ** 2 * pt.E(a) * pt.gf(a) / pt.D1(a)) , DX)
-        if order == 2:
-            DX2 = tf.multiply(dtype(pt.D2(a)) , lpt1(lpt2source(lineark, config), pos, config))
-            P2 = tf.multiply(dtype(a ** 2 * pt.f2(a) * pt.E(a)) , DX2)
-            F2 = tf.multiply(dtype(a ** 2 * pt.E(a) * pt.gf2(a) / pt.D2(a)) , DX2)
-            DX = tf.add(DX, DX2)
-            P = tf.add(P, P2)
-            F = tf.add(F, F2)
-            
-        X = tf.add(DX, Q)
-        return tf.stack((X, P, F), axis=0)
+    bs, nc = config['boxsize'], config['nc']
+    pos = Q 
+    dtype = np.float32
+    if a0 is None: a0 = config['stages'][0]
+    a = a0
+
+    lineark = r2c3d(linear, norm=nc**3)
+    pt = PerturbationGrowth(config['cosmology'], a=[a], a_normalize=1.0)
+    DX = tf.multiply(dtype(pt.D1(a)) , lpt1(lineark, pos, config)) 
+    P = tf.multiply(dtype(a ** 2 * pt.f1(a) * pt.E(a)) , DX)
+    F = tf.multiply(dtype(a ** 2 * pt.E(a) * pt.gf(a) / pt.D1(a)) , DX)
+    if order == 2:
+        DX2 = tf.multiply(dtype(pt.D2(a)) , lpt1(lpt2source(lineark, config), pos, config))
+        P2 = tf.multiply(dtype(a ** 2 * pt.f2(a) * pt.E(a)) , DX2)
+        F2 = tf.multiply(dtype(a ** 2 * pt.E(a) * pt.gf2(a) / pt.D2(a)) , DX2)
+        DX = tf.add(DX, DX2)
+        P = tf.add(P, P2)
+        F = tf.add(F, F2)
+
+    X = tf.add(DX, Q)
+    return tf.stack((X, P, F), axis=0)
 
 
 def Kick(state, ai, ac, af, config, dtype=np.float32):
@@ -157,7 +157,7 @@ def Force(state, ai, ac, af, config, dtype=np.float32):
 
     rho = cic_paint(rho, tf.multiply(state[0], nc/bs), wts)
     ##rho = tf.multiply(rho, 1/nbar)  ###I am not sure why this is not needed here
-    delta_k = tf.multiply(tf.spectral.fft3d(tf.cast(rho, tf.complex64)), 1/nc**3)
+    delta_k = r2c3d(rho, norm=nc**3)
     fac = dtype(1.5 * config['cosmology'].Om0)
     update = longrange(config, tf.multiply(state[0], nc/bs), delta_k, split=0, factor=fac)
     

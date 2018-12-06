@@ -4,15 +4,19 @@ import numpy
 import tensorflow as tf
 
 
-def r2c3d(rfield, config, dtype=tf.complex64):
-    nc = config['nc']
-    cfield = tf.multiply(tf.spectral.fft3d(tf.cast(rfield, dtype)), 1/config['nc']**3)
+
+
+def r2c3d(rfield, norm=None, dtype=tf.complex64):
+    if norm is None: norm = tf.cast(tf.reduce_prod(tf.shape(rfield)), dtype)
+    else: norm = tf.cast(norm, dtype)
+    cfield = tf.multiply(tf.spectral.fft3d(tf.cast(rfield, dtype)), 1/norm)
     return cfield
 
 
-def c2r3d(cfield, config, dtype=tf.float32):
-    nc = config['nc']
-    rfield = tf.multiply(tf.cast(tf.spectral.ifft3d(cfield), dtype), config['nc']**3)
+def c2r3d(cfield, norm=None, dtype=tf.float32):
+    if norm is None: norm = tf.cast(tf.reduce_prod(tf.shape(rfield)), dtype)
+    else: norm = tf.cast(norm, dtype)
+    rfield = tf.multiply(tf.cast(tf.spectral.ifft3d(cfield), dtype), norm)
     return rfield
     
 
@@ -133,6 +137,7 @@ def longrange(config, x, delta_k, split=0, factor=1):
     # use the four point kernel to suppresse artificial growth of noise like terms
 
     ndim = 3
+    norm = config['nc']**3
     lap = laplace(config)
     fknlrange = kernellongrange(config, split)
     kweight = lap * fknlrange    
@@ -142,7 +147,7 @@ def longrange(config, x, delta_k, split=0, factor=1):
     for d in range(ndim):
         force_dc = tf.multiply(pot_k, gradient(config, d))
         #forced = tf.multiply(tf.spectral.irfft3d(force_dc), config['nc']**3)
-        forced = tf.multiply(tf.cast(tf.spectral.ifft3d(force_dc), tf.float32), config['nc']**3)
+        forced = c2r3d(force_dc, norm=norm)
         force = cic_readout(forced, x)
         f.append(force)
     
