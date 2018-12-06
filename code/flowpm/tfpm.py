@@ -8,17 +8,28 @@ from background import *
 
 
 
-def linfield(config, seed=100):
+def genwhitenoise(nc, seed, type='complex'):
+    white = tf.random_normal(shape=(nc, nc, nc), mean=0, stddev=nc**1.5, seed=seed)
+    if type == 'real': return white
+    #whitec = tf.multiply(tf.spectral.fft3d(tf.cast(white, tf.complex64)), 1/nc**1.5)
+    elif type == 'complex':
+        whitec = r2c3d(white, norm=nc**3)
+        return whitec
+    
+    
+def linfield(config, seed=100, name='linfield'):
     '''generate a linear field with a given linear power spectrum'''
 
     bs, nc = config['boxsize'], config['nc']
     kmesh = sum(kk**2 for kk in config['kvec'])**0.5
     pkmesh = config['ipklin'](kmesh)
     
-    white = tf.random_normal(shape=(nc, nc, nc), mean=0, stddev=1.0, seed=seed)
-    whitec = tf.multiply(tf.spectral.fft3d(tf.cast(white, tf.complex64)), 1/nc**1.5)
-    lineark = tf.multiply(tf.multiply(whitec, pkmesh**0.5), 1/bs**1.5)
-    linear = c2r3d(lineark, norm=nc**3)
+    #white = tf.random_normal(shape=(nc, nc, nc), mean=0, stddev=nc**1.5, seed=seed)
+    #whitec = tf.multiply(tf.spectral.fft3d(tf.cast(white, tf.complex64)), 1/nc**1.5)
+    #whitec = r2c3d(white, norm=nc**3)
+    whitec = genwhitenoise(nc, seed, type='complex')
+    lineark = tf.multiply(whitec, (pkmesh/bs**3)**0.5)
+    linear = c2r3d(lineark, norm=nc**3, name=name)
     return linear
 
 
@@ -84,10 +95,10 @@ def lpt2source(dlin_k, config):
     return r2c3d(source, norm=nc**3)
 
 
-def lptz0(lineark, Q, config, a=1, order=2):
+def lptz0(lineark, config, a=1, order=2):
     '''one step 2 LPT displacement to z=0'''
     bs, nc = config['boxsize'], config['nc']
-    pos = Q*nc/bs
+    pos = config['grid']
     
     DX1 = 1 * tflpt1(lineark, pos, config)
     if order == 2: DX2 = 1 * tflpt1(tflpt2source(lineark, config), pos, config)
@@ -99,11 +110,12 @@ def lptz0(lineark, Q, config, a=1, order=2):
 # NBODY
 
 
-def lptinit(linear, Q, config, a0=None, order=2):
+def lptinit(linear, config, a0=None, order=2, name=None):
     """ Estimate the initial LPT displacement given an input linear (real) field """
     assert order in (1, 2)
 
     bs, nc = config['boxsize'], config['nc']
+    Q = config['grid']
     pos = Q 
     dtype = np.float32
     if a0 is None: a0 = config['stages'][0]
@@ -123,7 +135,7 @@ def lptinit(linear, Q, config, a0=None, order=2):
         F = tf.add(F, F2)
 
     X = tf.add(DX, Q)
-    return tf.stack((X, P, F), axis=0)
+    return tf.stack((X, P, F), axis=0, name=name)
 
 
 def Kick(state, ai, ac, af, config, dtype=np.float32):
@@ -202,7 +214,7 @@ def leapfrog(stages):
         p = a1
 
 
-def nbody(state, config, verbose=False):
+def nbody(state, config, verbose=False, name=None):
     '''Do the nbody evolution'''
     stepping = leapfrog(config['stages'])
     actions = {'F':Force, 'K':Kick, 'D':Drift}
@@ -210,6 +222,8 @@ def nbody(state, config, verbose=False):
     for action, ai, ac, af in stepping:
         if verbose: print(action, ai, ac, af)
         state = actions[action](state, ai, ac, af, config)
+    if name is not None:
+        state = tf.identity(state, name=name)
     return state
 
 

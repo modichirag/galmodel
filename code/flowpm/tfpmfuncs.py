@@ -6,17 +6,17 @@ import tensorflow as tf
 
 
 
-def r2c3d(rfield, norm=None, dtype=tf.complex64):
+def r2c3d(rfield, norm=None, dtype=tf.complex64, name=None):
     if norm is None: norm = tf.cast(tf.reduce_prod(tf.shape(rfield)), dtype)
     else: norm = tf.cast(norm, dtype)
-    cfield = tf.multiply(tf.spectral.fft3d(tf.cast(rfield, dtype)), 1/norm)
+    cfield = tf.multiply(tf.spectral.fft3d(tf.cast(rfield, dtype)), 1/norm, name=name)
     return cfield
 
 
-def c2r3d(cfield, norm=None, dtype=tf.float32):
+def c2r3d(cfield, norm=None, dtype=tf.float32, name=None):
     if norm is None: norm = tf.cast(tf.reduce_prod(tf.shape(rfield)), dtype)
     else: norm = tf.cast(norm, dtype)
-    rfield = tf.multiply(tf.cast(tf.spectral.ifft3d(cfield), dtype), norm)
+    rfield = tf.multiply(tf.cast(tf.spectral.ifft3d(cfield), dtype), norm, name=name)
     return rfield
     
 
@@ -39,7 +39,7 @@ def fftk(shape, boxsize, symmetric=True, finite=False, dtype=np.float64):
 
 
 
-def cic_paint(mesh, part, weight=None, cube_size=None, boxsize=None):
+def cic_paint(mesh, part, weight=None, cube_size=None, boxsize=None, name=None):
     """
         - mesh is a cube of format tf.Variable
         - part is a list of particles (:, 3), positions assumed to be in 
@@ -66,7 +66,7 @@ def cic_paint(mesh, part, weight=None, cube_size=None, boxsize=None):
     neighboor_coords = tf.mod(neighboor_coords , cube_size)
 
     update = tf.scatter_nd(neighboor_coords, kernel, [cube_size, cube_size, cube_size])
-    mesh = tf.add(mesh, update)
+    mesh = tf.add(mesh, update, name=name)
     return mesh
 
 

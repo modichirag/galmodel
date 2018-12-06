@@ -8,9 +8,10 @@ from tfpmfuncs import fftk
 
 
 class Config(dict):
-    def __init__(self, bs=100., nc=32, seed=100, stages=None, cosmo=None, pkfile=None, pkinitfile=None):
+    def __init__(self, bs=100., nc=32, seed=100, stages=None, cosmo=None, pkfile=None, pkinitfile=None, dtype=np.float32):
 
-        self['boxsize'] = np.float32(bs)
+        self['dtype'] = dtype
+        self['boxsize'] = dtype(bs)
         self['shift'] = 0.0
         self['nc'] = int(nc)
         self['ndim'] = 3
@@ -24,7 +25,8 @@ class Config(dict):
         self['stages'] = stages
         self['aout'] = [1.0]
         self['perturbation'] = MatterDominated(cosmo=self['cosmology'], a=self['stages'])
-        self['kvec'] = fftk(shape=(nc, nc, nc), boxsize=bs, symmetric=False, dtype=np.float32)
+        self['kvec'] = fftk(shape=(nc, nc, nc), boxsize=bs, symmetric=False, dtype=dtype)
+        self['grid'] = bs/nc*np.indices((nc, nc, nc)).reshape(3, -1).T.astype(dtype)
         
         if pkfile is None: pkfile = './Planck15_a1p00.txt'
         self['pkfile'] = pkfile
