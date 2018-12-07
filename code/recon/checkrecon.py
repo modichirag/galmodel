@@ -6,7 +6,7 @@ import tools
 import matplotlib.pyplot as plt
 
 
-bs, nc = 100, 32
+bs, nc = 400, 128
 seed = 100
 ofolder = './saved/L%04d_N%04d_S%04d/'%(bs, nc, seed)
 figfolder = ofolder + 'figs/'
@@ -18,7 +18,7 @@ k, pt = tools.power(1+truemesh, boxsize=bs)
 
 fig, ax = plt.subplots(1, 2, figsize = (9, 4), sharex=True)
 
-for j, it in enumerate([101, 201, 401, 701]):
+for j, it in enumerate([10, 20, 50, 100]):
     reconmesh = np.load(ofolder + 'recon%d.f4.npy'%it)
 
     k, pr = tools.power(1+reconmesh, boxsize=bs)

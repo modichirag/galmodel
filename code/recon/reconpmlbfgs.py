@@ -1,7 +1,7 @@
 import numpy as np
 import numpy
 import os, sys
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 from time import time
 import matplotlib.pyplot as plt
 
@@ -113,23 +113,24 @@ def reconmodelanneal(config, data, sigma=0.01**0.5, maxiter=100):
 
 
 
-def loss_callback(var, literals):
+def loss_callback(var, literals, nprint=10, nsave=10):
     losses = literals['losses']
     loss = var[0]
     mesh = var[1]
     nit = len(losses)  
     losses.append(loss)
 
-    if nit % 100 == 0: print(nit, loss)
-    if nit % 100 == 0:
+    if nit % nprint == 0:
+        print(nit, loss)
+    if nit % nsave == 0:
         np.save(ofolder + 'recon%d.f4'%nit, mesh)
         
 
-#Generate DATA
+########################
 
 if __name__=="__main__":
 
-    bs, nc = 100, 32
+    bs, nc = 400, 128
     seed = 100
     ofolder = './saved/L%04d_N%04d_S%04d/'%(bs, nc, seed)
     try: os.makedirs(ofolder)
@@ -145,17 +146,18 @@ if __name__=="__main__":
     np.random.seed(100)
     noise = np.random.normal(loc=0, scale=sigma, size=nc**3).reshape(nc, nc, nc).astype(config['dtype'])
     datan = data + noise
+    np.save(ofolder + 'datan.f4', datan)
 
     ###
     #Do reconstruction here
     print('\nDo reconstruction\n')
 
-    recong = reconmodel(config, datan, sigma=sigma, maxiter=1000)
-
+    recong = reconmodel(config, datan, sigma=sigma, maxiter=100)
     
     initval = None
     losses = []
     literals = {'losses':losses}
+    lcallback = lambda x: loss_callback(x, literals=literals)
     
     with tf.Session(graph=recong) as session:
         g = session.graph
@@ -173,10 +175,11 @@ if __name__=="__main__":
             session.run(initlinop, {initlin:initval})
 
         init = session.run(linmesh)
-        optimizer.minimize(session, loss_callback=lambda x:loss_callback(x, literals),
-                           fetches=[[[loss, chisq, prior], linmesh]])
-        recon = session.run(linmesh)
-
         np.save(ofolder + 'init.f4', init)
+
+        optimizer.minimize(session, loss_callback=lcallback,
+                           fetches=[[[loss, chisq, prior], linmesh]])
+
+        recon = session.run(linmesh)
         np.save(ofolder + 'recon.f4', recon)
         
