@@ -199,7 +199,7 @@ def guassdiff(pm, R1, R2):
 def power(f1, f2=None, boxsize=1.0, k = None):
     """
     Calculate power spectrum given density field in real space & boxsize.
-    Divide by mean
+    Divide by mean, so mean should be non-zero
     """
 #    f1 = f1[::2, ::2, ::2]
     c1 = numpy.fft.rfftn(f1)
