@@ -2,9 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 #
 import sys, os
-sys.path.append('./utils/')
+sys.path.append('../utils/')
 import tools
-import datalib as dlib
 import datatools as dtools
 from time import time
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
@@ -20,7 +19,8 @@ tfd = tensorflow_probability.distributions
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
-
+import logging
+from datetime import datetime
 
 #############################
 seed_in = 3
@@ -33,7 +33,7 @@ bs = 400
 nc, ncf = 128, 512
 ncp = 128
 step, stepf = 5, 40
-path = './../data/z00/'
+path = '../../data/z00/'
 ftype = 'L%04d_N%04d_S%04d_%02dstep/'
 numd = 1e-3
 num = int(numd*bs**3)
@@ -46,24 +46,30 @@ rprob = 0.5
 
 #############################
 
-suff = 'pad2'
-fname = open('./models/galmodel/README', 'a+', 1)
-fname.write('%s \t :\n\tModel to predict central and satellite likelihood in  trainestmodvargal.py with data supplemented by size=8, 16, 32, 64; rotationwith probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner\n'%suff)
+suff = 'pad2_32'
+fname = open('../models/n10/README', 'a+', 1)
+fname.write('%s \t :\n\tModel to predict halo position likelihood in  trainestmodvarhalo.py with data supplemented by size=32 only; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. Changed teh n_y=1 and high of quntized distribution to 4\n'%suff)
 fname.close()
 
-savepath = './models/galmodel/%s/'%suff
-if not os.path.exists(savepath):
-    os.makedirs(savepath)
+savepath = '../models/n10/%s/'%suff
+#if not os.path.exists(savepath):
+#    os.makedirs(savepath)
+try : os.makedirs(savepath)
+except: pass
+
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
 num_cubes= 500
-cube_sizes = np.array([8, 16, 32, 64]).astype(int)
+#cube_sizes = np.array([8, 16, 32, 64, 128]).astype(int)
+cube_sizes = np.array([32]).astype(int)
 nsizes = len(cube_sizes)
 pad = int(2)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = ncp - cube_sizes
 ftname = ['cic']
+tgname = ['pnn']
 nchannels = len(ftname)
+ntargets = len(tgname)
 print('Features are ', ftname, file=fname)
 print('Pad with ', pad, file=fname)
 print('Rotation probability = %0.2f'%rprob, file=fname)
@@ -88,18 +94,19 @@ def generate_training_data():
         #mesh['GD'] = mesh['R1'] - mesh['R2']
 
         hmesh = {}
-        hpath = path + ftype%(bs, ncf, seed, stepf) + 'galaxies_n05/galcat/'
-        hposd = tools.readbigfile(hpath + 'Position/')
+        hpath = path + ftype%(bs, ncf, seed, stepf) + 'FOF/'
+        hposd = tools.readbigfile(hpath + 'PeakPosition/')
         massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
-        galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
-        #hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
-        #hposd = hposall[:num].copy()
-        #massd = massall[:num].copy()
+        #galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
+        hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
+        massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
+        hposd = hposall[:num].copy()
+        massd = massall[:num].copy()
         #hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
         hmesh['pnn'] = tools.paintnn(hposd, bs, ncp)
-        #hmesh['mnn'] = tools.paintnn(hposd, bs, ncp, massd)
-        hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, ncp)
-        hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, ncp)
+        hmesh['mnn'] = tools.paintnn(hposd, bs, ncp, massd)
+        #hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, ncp)
+        #hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, ncp)
 
         meshes[seed] = [mesh, hmesh]
 
@@ -109,13 +116,16 @@ def generate_training_data():
         ftlist = [mesh[i].copy() for i in ftname]
         ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
     #     targetmesh = hmesh['pnn']
-        targetmesh = [hmesh['pnncen'], hmesh['pnnsat']]
-        ntarget = len(targetmesh)
+        targetmesh = [hmesh[i].copy() for i in tgname]
 
         for i, size in enumerate(cube_sizes):
             print('For size = ', size)
-            numcubes = int(num_cubes/size*4)
-            features, target = dtools.randomvoxels(ftlistpad, targetmesh, numcubes, max_offset[i], 
+            if size==nc:
+                features = [np.stack(ftlistpad, axis=-1)]
+                target = [np.stack(targetmesh, axis=-1)]
+            else:
+                numcubes = int(num_cubes/size*4)
+                features, target = dtools.randomvoxels(ftlistpad, targetmesh, numcubes, max_offset[i], 
                                                 size, cube_sizesft[i], seed=seed, rprob=0)
             cube_features[i] = cube_features[i] + features
             cube_target[i] = cube_target[i] + target
@@ -187,7 +197,7 @@ def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
                 distribution=tfd.Logistic(loc=loc, scale=scale),
                 bijector=tfb.AffineScalar(shift=-0.5)),
             low=0.,
-            high=2**4 - 1.)
+            high=2.**3-1)
 
         mixture_dist = tfd.MixtureSameFamily(
             mixture_distribution=tfd.Categorical(logits=logits),
@@ -228,7 +238,7 @@ def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             global_step=tf.train.get_global_step()
-            boundaries = [15000, 30000, 45000, 60000]
+            boundaries = [10000, 20000, 30000, 40000]
             values = [0.00001, 0.000005, 0.000001, 0.0000005, 0.0000001]
             learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
             train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
@@ -284,6 +294,7 @@ def mapping_function(inds):
         
         isize = np.random.choice(len(cube_sizes), 1, replace=True)[0]
         batch = int(batch_size*8/cube_sizes[isize])
+        if isize == cube_sizes[isize]==nc : batch = 1
         inds = inds[:batch]
         trainingsize = cube_features[isize].shape[0]
         inds[inds >= trainingsize] =  (inds[inds >= trainingsize])%trainingsize
@@ -326,106 +337,115 @@ def testing_input_fn():
     dataset = dataset.map(mapping_function)
     return dataset
 
-#############################################################################
 
 
-run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
 
-model =  MDNEstimator(n_y=2, n_mixture=8, dropout=0.95,
+
+
+
+def save_module(model, savepath, max_steps):
+
+    print('Save module')
+
+    features = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+    labels = tf.placeholder(tf.float32, shape=[None, None, None, None, ntargets], name='labels')
+    exporter = hub.LatestModuleExporter("tf_hub", tf.estimator.export.build_raw_serving_input_receiver_fn({'features':features, 'labels':labels},
+                                                                       default_batch_size=None))
+    modpath = exporter.export(model, savepath + 'module', model.latest_checkpoint())
+    modpath = modpath.decode("utf-8") 
+    check_module(modpath)
+    
+
+#####
+def check_module(modpath):
+    print('Test module')
+    tf.reset_default_graph()
+    module = hub.Module(modpath + '/likelihood/')
+    xx = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+    yy = tf.placeholder(tf.float32, shape=[None, None, None, None, ntargets], name='labels')
+    samples = module(dict(features=xx, labels=yy), as_dict=True)['sample']
+    loglik = module(dict(features=xx, labels=yy), as_dict=True)['loglikelihood']
+
+    preds = {}
+    with tf.Session() as sess:
+        sess.run(tf.initializers.global_variables())
+
+        for seed in seeds:
+            xxm = np.pad(meshes[seed][0]['cic'] , pad, 'wrap')
+            #yym = np.stack([np.pad(meshes[seed][1]['pnncen'], pad, 'wrap'), np.pad(meshes[seed][1]['pnnsat'], pad, 'wrap')], axis=-1)
+            yym = np.stack([meshes[seed][1][i] for i in tgname], axis=-1)
+            print(xxm.shape, yym.shape)
+            preds[seed] = sess.run(samples, feed_dict={xx:np.expand_dims(np.expand_dims(xxm,  -1), 0), yy:np.expand_dims(yym, 0)})
+            meshes[seed][0]['predict'] = preds[seed][:, :, :]
+
+
+    ##############################
+    ##Power spectrum
+    shape = [nc,nc,nc]
+    kk = tools.fftk(shape, bs)
+    kmesh = sum(i**2 for i in kk)**0.5
+
+    fig, axar = plt.subplots(2, 2, figsize = (8, 8))
+    ax = axar[0]
+    for seed in seeds:
+        for i, key in enumerate(['']):
+            predict, hpmeshd = meshes[seed][0]['predict%s'%key] , meshes[seed][1]['pnn%s'%key], 
+            k, pkpred = tools.power(predict/predict.mean(), boxsize=bs, k=kmesh)
+            k, pkhd = tools.power(hpmeshd/hpmeshd.mean(), boxsize=bs, k=kmesh)
+            k, pkhx = tools.power(hpmeshd/hpmeshd.mean(), predict/predict.mean(), boxsize=bs, k=kmesh)    
+        ##
+            ax[0].semilogx(k[1:], pkpred[1:]/pkhd[1:], label=seed)
+            ax[1].semilogx(k[1:], pkhx[1:]/(pkpred[1:]*pkhd[1:])**0.5)
+            ax[0].set_title(key, fontsize=12)
+
+    for axis in ax.flatten():
+        axis.legend(fontsize=14)
+        axis.set_yticks(np.arange(0, 1.1, 0.1))
+        axis.grid(which='both')
+        axis.set_ylim(0.,1.1)
+    ax[0].set_ylabel('Transfer function', fontsize=14)
+    ax[1].set_ylabel('Cross correlation', fontsize=14)
+    #
+    ax = axar[1]
+    for i, key in enumerate([ '']):
+        predict, hpmeshd = meshes[seed][0]['predict%s'%key] , meshes[seed][1]['pnn%s'%key], 
+        vmin, vmax = 0, (hpmeshd[:, :, :].sum(axis=0)).max()
+        im = ax[0].imshow(predict[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
+        im = ax[1].imshow(hpmeshd[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
+        ax[0].set_title(key, fontsize=15)
+    ax[0].set_title('Prediction', fontsize=15)
+    ax[1].set_title('Truth', fontsize=15)
+    plt.savefig(savepath + '/predict%d.png'%max_steps)
+    plt.show()
+
+#
+
+
+############################################################################
+# get TF logger
+log = logging.getLogger('tensorflow')
+log.setLevel(logging.DEBUG)
+
+# create formatter and add it to the handlers
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# create file handler which logs even debug messages
+try: os.makedirs(savepath + '/logs/')
+except: pass
+logfile = datetime.now().strftime('logs/tflogfile_%H_%M_%d_%m_%Y.log')
+fh = logging.FileHandler(savepath + logfile)
+fh.setLevel(logging.DEBUG)
+fh.setFormatter(formatter)
+log.addHandler(fh)
+
+
+for max_steps in np.array([5e3, 1e4, 2e4, 3e4]).astype(int):
+    print('For max_steps = ', max_steps)
+    tf.reset_default_graph()
+    run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
+
+    model =  MDNEstimator(n_y=ntargets, n_mixture=8, dropout=0.95,
                       model_dir=savepath + 'model', config = run_config)
 
-model.train(training_input_fn, max_steps=100000)
-
-
-# Trying to export
-print('Save module')
-features = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
-labels = tf.placeholder(tf.float32, shape=[None, None, None, None, 2], name='observations')
-    
-exporter = hub.LatestModuleExporter("tf_hub", tf.estimator.export.build_raw_serving_input_receiver_fn({'features':features, 'labels':labels},
-                                                                   default_batch_size=None))
-
-modpath = exporter.export(model, savepath + 'module', model.latest_checkpoint())
-modpath = modpath.decode("utf-8") 
-
-print('Test module')
-
-tf.reset_default_graph()
-module = hub.Module(modpath + '/likelihood/')
-xx = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
-yy = tf.placeholder(tf.float32, shape=[None, None, None, None, 2], name='labels')
-samples = module(dict(features=xx, labels=yy), as_dict=True)['sample']
-loglik = module(dict(features=xx, labels=yy), as_dict=True)['loglikelihood']
-
-preds = {}
-with tf.Session() as sess:
-    sess.run(tf.initializers.global_variables())
-
-    for seed in seeds:
-        xxm = np.pad(meshes[seed][0]['cic'], pad, 'wrap')
-        #yym = np.stack([np.pad(meshes[seed][1]['pnncen'], pad, 'wrap'), np.pad(meshes[seed][1]['pnnsat'], pad, 'wrap')], axis=-1)
-        yym = np.stack([meshes[seed][1]['pnncen'], meshes[seed][1]['pnnsat']], axis=-1)
-        print(xxm.shape, yym.shape)
-        preds[seed] = sess.run(samples, feed_dict={xx:np.expand_dims(np.expand_dims(xxm,  -1), 0), yy:np.expand_dims(yym, 0)})
-        meshes[seed][0]['predictcen'] = preds[seed][:, :, :, 0]
-        meshes[seed][0]['predictsat'] = preds[seed][:, :, :, 1]
-
-
-##############################
-##Power spectrum
-shape = [nc,nc,nc]
-kk = tools.fftk(shape, bs)
-kmesh = sum(i**2 for i in kk)**0.5
-
-fig, ax = plt.subplots(2, 3, figsize = (12, 8))
-for seed in seeds:
-    for i, key in enumerate(['cen', 'sat']):
-        predict, hpmeshd = meshes[seed][0]['predict%s'%key] , meshes[seed][1]['pnn%s'%key], 
-        k, pkpred = tools.power(predict/predict.mean(), boxsize=bs, k=kmesh)
-        k, pkhd = tools.power(hpmeshd/hpmeshd.mean(), boxsize=bs, k=kmesh)
-        k, pkhx = tools.power(hpmeshd/hpmeshd.mean(), predict/predict.mean(), boxsize=bs, k=kmesh)    
-    ##
-        ax[0, i].semilogx(k[1:], pkpred[1:]/pkhd[1:], label=seed)
-        ax[1, i].semilogx(k[1:], pkhx[1:]/(pkpred[1:]*pkhd[1:])**0.5)
-        ax[0, i].set_title(key, fontsize=12)
-
-    i=2
-    predict, hpmeshd = meshes[seed][0]['predictcen']+meshes[seed][0]['predictsat'] ,\
-        meshes[seed][1]['pnncen']+meshes[seed][1]['pnnsat']
-    k, pkpred = tools.power(predict/predict.mean(), boxsize=bs, k=kmesh)
-    k, pkhd = tools.power(hpmeshd/hpmeshd.mean(), boxsize=bs, k=kmesh)
-    k, pkhx = tools.power(hpmeshd/hpmeshd.mean(), predict/predict.mean(), boxsize=bs, k=kmesh)    
-##
-    ax[0, i].semilogx(k[1:], pkpred[1:]/pkhd[1:], label=seed, ls='-')
-    ax[1, i].semilogx(k[1:], pkhx[1:]/(pkpred[1:]*pkhd[1:])**0.5, ls='-')
-    
-for axis in ax.flatten():
-    axis.legend(fontsize=14)
-    axis.set_yticks(np.arange(0, 1.1, 0.1))
-    axis.grid(which='both')
-    axis.set_ylim(0.,1.1)
-ax[0, i].set_title('All Gal', fontsize=15)
-ax[0, 0].set_ylabel('Transfer function', fontsize=14)
-ax[1, 0].set_ylabel('Cross correlation', fontsize=14)
-plt.savefig(savepath + '/2pt.png')
-plt.show()
-
-# ##################################################
-fig, ax = plt.subplots(2, 3, figsize=(12,8))
-
-for i, key in enumerate([ 'cen', 'sat']):
-    predict, hpmeshd = meshes[seed][0]['predict%s'%key] , meshes[seed][1]['pnn%s'%key], 
-    vmin, vmax = 0, (hpmeshd[:, :, :].sum(axis=0)).max()
-    im = ax[0, i].imshow(predict[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
-    im = ax[1, i].imshow(hpmeshd[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
-    ax[0, i].set_title(key, fontsize=15)
-i=2
-predict, hpmeshd = meshes[seed][0]['predictcen']+meshes[seed][0]['predictsat'] ,\
-        meshes[seed][1]['pnncen']+meshes[seed][1]['pnnsat']
-im = ax[0, i].imshow(predict[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
-im = ax[1, i].imshow(hpmeshd[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
-ax[0, i].set_title('All Gal', fontsize=15)
-ax[0, 0].set_ylabel('Prediction', fontsize=15)
-ax[1, 0].set_ylabel('Truth', fontsize=15)
-plt.savefig(savepath + '/imshow.png')
-plt.show()
+    model.train(training_input_fn, max_steps=max_steps)
+    save_module(model, savepath, max_steps)

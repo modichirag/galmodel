@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import sys, os
 sys.path.append('./utils/')
 import tools
-import datalib as dlib
 import datatools as dtools
 from time import time
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
@@ -47,9 +46,9 @@ rprob = 0.5
 
 #############################
 
-suff = 'test'
+suff = 'poisson'
 fname = open('./models/n10/README', 'a+', 1)
-fname.write('%s \t :\n\tModel to predict halo position likelihood in  trainestmodvarhalo.py with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. Changed teh n_y=1 and high of quntized distribution to 4\n'%suff)
+fname.write('%s \t :\n\tModel to predict halo position likelihood in  trainestmodvarhalo.py with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. Pdf is single poisson pdf\n'%suff)
 fname.close()
 
 savepath = './models/n10/%s/'%suff
@@ -180,32 +179,17 @@ def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
         net = slim.conv3d(net, 32, 3, activation_fn=tf.nn.tanh)
 
         # Define the probabilistic layer 
-        net = slim.conv3d(net, n_mixture*3*n_y, 1, activation_fn=None)
+        #out_rate = slim.conv3d(net, 1, 1, activation_fn=tf.nn.relu)
+        #out_rate = tf.math.add(out_rate, 1e-6, name='rate')
+        net = slim.conv3d(net, n_mixture*n_y, 1, activation_fn=tf.nn.relu)
         cube_size = tf.shape(obs_layer)[1]
-        net = tf.reshape(net, [-1, cube_size, cube_size, cube_size, n_y, n_mixture*3])
-#         net = tf.reshape(net, [None, None, None, None, n_y, n_mixture*3])
-        loc, unconstrained_scale, logits = tf.split(net,
-                                                    num_or_size_splits=3,
-                                                    axis=-1)
-        scale = tf.nn.softplus(unconstrained_scale)
-
-        # Form mixture of discretized logistic distributions. Note we shift the
-        # logistic distribution by -0.5. This lets the quantization capture "rounding"
-        # intervals, `(x-0.5, x+0.5]`, and not "ceiling" intervals, `(x-1, x]`.
-        discretized_logistic_dist = tfd.QuantizedDistribution(
-            distribution=tfd.TransformedDistribution(
-                distribution=tfd.Logistic(loc=loc, scale=scale),
-                bijector=tfb.AffineScalar(shift=-0.5)),
-            low=0.,
-            high=2.**3-1)
-
-        mixture_dist = tfd.MixtureSameFamily(
-            mixture_distribution=tfd.Categorical(logits=logits),
-            components_distribution=discretized_logistic_dist)
+        out_rate = tf.reshape(net, [-1, cube_size, cube_size, cube_size, n_y])
+        out_rate = tf.math.add(out_rate, 1e-6, name='rate')
+        pdf = tfd.Poisson(rate=out_rate)
 
         # Define a function for sampling, and a function for estimating the log likelihood
-        sample = tf.squeeze(mixture_dist.sample())
-        loglik = mixture_dist.log_prob(obs_layer)
+        sample = tf.squeeze(pdf.sample())
+        loglik = pdf.log_prob(obs_layer)
         hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
                           outputs={'sample':sample, 'loglikelihood':loglik})
     
@@ -238,7 +222,7 @@ def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             global_step=tf.train.get_global_step()
-            boundaries = [15000, 30000, 45000, 60000]
+            boundaries = [10000, 20000, 30000, 40000]
             values = [0.00001, 0.000005, 0.000001, 0.0000005, 0.0000001]
             learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
             train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
@@ -261,7 +245,7 @@ class MDNEstimator(tf.estimator.Estimator):
 
     def __init__(self,
                  n_y,
-                 n_mixture,
+                 n_mixture=1,
                  optimizer=tf.train.AdamOptimizer,
                  dropout=None,
                  model_dir=None,
@@ -294,7 +278,7 @@ def mapping_function(inds):
         
         isize = np.random.choice(len(cube_sizes), 1, replace=True)[0]
         batch = int(batch_size*8/cube_sizes[isize])
-        if isize == cube_sizes[isize]==nc : batch = 1
+        if cube_sizes[isize]==nc : batch = 1
         inds = inds[:batch]
         trainingsize = cube_features[isize].shape[0]
         inds[inds >= trainingsize] =  (inds[inds >= trainingsize])%trainingsize
@@ -439,12 +423,12 @@ fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-for max_steps in np.array([5e2, 1e2, 2e2]).astype(int):
+for max_steps in (np.arange(0.5, 5, 0.5)*1e4).astype(int):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
 
-    model =  MDNEstimator(n_y=ntargets, n_mixture=8, dropout=0.95,
+    model =  MDNEstimator(n_y=ntargets, n_mixture=1, dropout=0.95,
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)

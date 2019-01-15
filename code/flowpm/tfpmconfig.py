@@ -1,11 +1,13 @@
 import numpy as np
-import numpy
+import numpy, os
 from scipy.interpolate import InterpolatedUnivariateSpline as iuspline
 from  astropy.cosmology import Planck15 
 from background import MatterDominated
 from tfpmfuncs import fftk
 ##
-
+package_path = os.path.dirname(os.path.abspath(__file__))
+#print(package_path)
+##
 
 class Config(dict):
     def __init__(self, bs=100., nc=32, seed=100, stages=None, cosmo=None, pkfile=None, pkinitfile=None, dtype=np.float32):
@@ -28,9 +30,9 @@ class Config(dict):
         self['kvec'] = fftk(shape=(nc, nc, nc), boxsize=bs, symmetric=False, dtype=dtype)
         self['grid'] = bs/nc*np.indices((nc, nc, nc)).reshape(3, -1).T.astype(dtype)
         
-        if pkfile is None: pkfile = './Planck15_a1p00.txt'
+        if pkfile is None: pkfile = package_path + '/Planck15_a1p00.txt'
         self['pkfile'] = pkfile
-        if pkinitfile is None: pkinitfile = './Planck15_a0p01.txt'
+        if pkinitfile is None: pkinitfile = package_path + '/Planck15_a0p01.txt'
         self['pkfile_ainit'] = pkinitfile
 
         self.finalize()
