@@ -7,13 +7,13 @@ from nbodykit.cosmology import Cosmology, EHPower, Planck15
 
 ##
 class Config(dict):
-    def __init__(self):
+    def __init__(self, bs=40., nc=8, seed=100):
 
-        self['boxsize'] = 40
+        self['boxsize'] = bs
         self['shift'] = 0.0
-        self['nc'] = 8
+        self['nc'] = int(nc)
         self['ndim'] = 3
-        self['seed'] = 100
+        self['seed'] = seed
         self['pm_nc_factor'] = 1
         self['resampler'] = 'cic'
         self['cosmology'] = Planck15

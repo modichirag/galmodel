@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 import numpy
 import os, sys
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import tensorflow as tf
-import tensorflow_hub as hub
+#import tensorflow_hub as hub
 
 sys.path.append('../flowpm/')
 from background import *
@@ -19,6 +19,7 @@ import datatools as dtools
 #Generate DATA
 
 dpath = './../../data/z00/'
+dpath = '//project/projectdirs/astro250/chmodi/cosmo4d/data/z00/'
 ftype = 'L%04d_N%04d_S%04d_%02dstep/'
 
 
@@ -266,39 +267,39 @@ if __name__=="__main__":
     step = 5
 
     config = Config(bs=bs, nc=nc, seed=seed)
-    modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-logistic/module/1546529135/likelihood'
-
-    testlin = np.random.uniform(size=nc**3).reshape(nc, nc, nc)
+#    modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-logistic/module/1546529135/likelihood'
 #
-
-    truelin = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/s/').astype(np.float32)
-    truefin = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/d/').astype(np.float32)
-    truedata = dtools.gethalomesh(bs, nc, seed).astype(np.float32)
-    
-    g = graphlintomod(config, modpath, pad=2, ny=1)
-    savehalofig2([truelin, truefin, truedata], truelin, fname='./figs/genlintohpos2.png', hgraph=g)
-    
-    linear, final, data = genlintomod(config, modpath, truelin, np.expand_dims(truedata, -1)*0, pad=2)
-    fig, axar = plt.subplots(2, 3, figsize = (12, 8))
-    ax = axar[0]
-    im = ax[0].imshow(truelin.sum(axis=0))
-    plt.colorbar(im, ax=ax[0])
-    im = ax[1].imshow(truefin.sum(axis=0))
-    plt.colorbar(im, ax=ax[1])
-    im = ax[2].imshow(truedata.sum(axis=0))
-    plt.colorbar(im, ax=ax[2])
-    ax[0].set_ylabel('Truth')
-    ax = axar[1]
-    im = ax[0].imshow(linear.sum(axis=0))
-    plt.colorbar(im, ax=ax[0])
-    im = ax[1].imshow(final.sum(axis=0))
-    plt.colorbar(im, ax=ax[1])
-    im = ax[2].imshow(data.sum(axis=0))
-    plt.colorbar(im, ax=ax[2])
-    ax[0].set_ylabel('Sample')
-    plt.savefig('./figs/genlintohpos.png')
-
-
+#    testlin = np.random.uniform(size=nc**3).reshape(nc, nc, nc)
+##
+#
+#    truelin = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/s/').astype(np.float32)
+#    truefin = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/d/').astype(np.float32)
+#    truedata = dtools.gethalomesh(bs, nc, seed).astype(np.float32)
+#    
+#    g = graphlintomod(config, modpath, pad=2, ny=1)
+#    savehalofig2([truelin, truefin, truedata], truelin, fname='./figs/genlintohpos2.png', hgraph=g)
+#    
+#    linear, final, data = genlintomod(config, modpath, truelin, np.expand_dims(truedata, -1)*0, pad=2)
+#    fig, axar = plt.subplots(2, 3, figsize = (12, 8))
+#    ax = axar[0]
+#    im = ax[0].imshow(truelin.sum(axis=0))
+#    plt.colorbar(im, ax=ax[0])
+#    im = ax[1].imshow(truefin.sum(axis=0))
+#    plt.colorbar(im, ax=ax[1])
+#    im = ax[2].imshow(truedata.sum(axis=0))
+#    plt.colorbar(im, ax=ax[2])
+#    ax[0].set_ylabel('Truth')
+#    ax = axar[1]
+#    im = ax[0].imshow(linear.sum(axis=0))
+#    plt.colorbar(im, ax=ax[0])
+#    im = ax[1].imshow(final.sum(axis=0))
+#    plt.colorbar(im, ax=ax[1])
+#    im = ax[2].imshow(data.sum(axis=0))
+#    plt.colorbar(im, ax=ax[2])
+#    ax[0].set_ylabel('Sample')
+#    plt.savefig('./figs/genlintohpos.png')
+#
+#
 
 #    ###Test pm without input lin filed
 #    print('do without input field')
@@ -311,15 +312,24 @@ if __name__=="__main__":
 #    plt.savefig('./figs/genpm.png')
 ##
 
-#    ###Test pm with input lin filed
-#    #testlin = linear.copy()
-#
-#    print('do with input field')
-#    del linear
-#    linear, final = genpm(config, linmesh=testlin)
-#    fig, ax = plt.subplots(1, 2, figsize = (8, 4))
-#    im = ax[0].imshow(linear.sum(axis=0))
-#    plt.colorbar(im, ax=ax[0])
-#    im = ax[1].imshow(final.sum(axis=0))
-#    plt.colorbar(im, ax=ax[1])
-#    plt.savefig('./figs/genpmlinmesh.png')
+    ###Test pm with input lin filed
+
+    truelin = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/s/').astype(np.float32)
+    truefin = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/d/').astype(np.float32)
+
+    print('\ndo with input field\n')
+    linear, final = genpm(config, linmesh=truelin)
+    fig, ax = plt.subplots(2, 3, figsize = (12, 8))
+    im = ax[0, 0].imshow(truelin.sum(axis=0))
+    plt.colorbar(im, ax=ax[0, 0])
+    im = ax[1, 0].imshow(truefin.sum(axis=0))
+    plt.colorbar(im, ax=ax[1, 0])
+    im = ax[0, 1].imshow(linear.sum(axis=0))
+    plt.colorbar(im, ax=ax[0, 1])
+    im = ax[1, 1].imshow(final.sum(axis=0))
+    plt.colorbar(im, ax=ax[1, 1])
+    im = ax[0, 2].imshow((truelin-linear).sum(axis=0))
+    plt.colorbar(im, ax=ax[0, 2])
+    im = ax[1, 2].imshow((truefin-final).sum(axis=0))
+    plt.colorbar(im, ax=ax[1, 2])
+    plt.savefig('./figs/genpmlinmesh.png')

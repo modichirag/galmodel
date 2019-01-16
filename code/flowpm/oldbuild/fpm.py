@@ -1,6 +1,8 @@
 import numpy as np
-import numpy
-from nbodykit.lab import BigFileMesh, BigFileCatalog
+import numpy, os, sys
+from nbodykit.lab import BigFileMesh, BigFileCatalog, FieldMesh, ArrayCatalog, KDDensity
+#from nbodykit.source.mesh.field import FieldMesh
+
 from pmesh.pm import ParticleMesh
 
 #from nbodykit.cosmology import Cosmology, EHPower, Planck15
@@ -293,3 +295,51 @@ def fastpm(lptinit=False):
 
     solver.nbody(state, stepping=leapfrog(config['stages']), monitor=monitor)
     return state
+
+
+
+
+if __name__=="__main__":
+
+    sys.path.append('../../utils')
+    import tools
+
+    bs, nc = 400, 128
+    z = 0
+    nsteps = 5
+    seed = 100
+    seeds = np.arange(100, 1100, 100)
+
+    for seed in seeds:
+        #Setup
+        conf = Config(bs=bs, nc=nc, seed=seed)
+        pm = conf.pm
+        assert conf['stages'].size == nsteps
+
+        grid = pm.generate_uniform_particle_grid(shift=0).astype(np.float32)
+        kvec = tools.fftk((nc, nc, nc), bs, dtype=np.float32, symmetric=False)
+        solver = Solver(pm, conf['cosmology'])
+        conf['kvec'] = kvec
+        conf['grid'] = grid
+
+        #PM
+        whitec = pm.generate_whitenoise(seed, mode='complex', unitary=False)
+        lineark = whitec.apply(lambda k, v:Planck15.get_pklin(sum(ki ** 2 for ki in k)**0.5, 0) ** 0.5 * v / v.BoxSize.prod() ** 0.5)
+        linear = lineark.c2r()
+        lineark = linear.r2c()
+        state = solver.lpt(lineark, grid, conf['stages'][0], order=2)
+        solver.nbody(state, leapfrog(conf['stages']))
+        final = pm.paint(state.X)
+        if pm.comm.rank == 0:
+            print('X, V computed')
+        cat = ArrayCatalog({'Position': state.X, 'Velocity' : state.V}, BoxSize=pm.BoxSize, Nmesh=pm.Nmesh)
+        kdd = KDDensity(cat).density
+        cat['KDDensity'] = kdd
+
+        #Save
+        path = '/project/projectdirs/astro250/chmodi/cosmo4d/data/'
+        ofolder = path + 'z%02d/L%04d_N%04d_S%04d_%02dstep_fpm/'%(z*10, bs, nc, seed, nsteps)
+        FieldMesh(linear).save(ofolder+'mesh', dataset='s', mode='real')
+        FieldMesh(final).save(ofolder+'mesh', dataset='d', mode='real')
+        cat.save(ofolder + 'dynamic/1', ('Position', 'Velocity', 'KDDensity'))
+
