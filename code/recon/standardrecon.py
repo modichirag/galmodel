@@ -35,7 +35,40 @@ def standardrecon(config, base, pos, bias, R=8):
         tf.add_to_collection('recon', [displaced, random])
     return g
 
+
+
+
+
+def standardinit(config, base, pos, final, R=8):
+
+    ##
+    print('Initial condition from standard reconstruction')
+    bs, nc = config['boxsize'], config['nc']
     
+    if abs(base.mean()) > 1e-6: 
+        base = (base - base.mean())/base.mean()
+    pfin = tools.power(final, boxsize=bs)[1]
+    ph = tools.power(1+base, boxsize=bs)[1]
+    bias = ((ph[1:5]/pfin[1:5])**0.5).mean()
+    print('Bias = ', bias)
+
+    g = standardrecon(config, base, pos, bias, R=R)
+
+    with tf.Session(graph=g) as sess:
+        sess.run(tf.global_variables_initializer())
+        tfdisplaced = g.get_tensor_by_name('displaced:0')
+        tfrandom = g.get_tensor_by_name('random:0')
+
+        displaced, random = sess.run([tfdisplaced, tfrandom])
+
+    displaced /= displaced.mean()
+    displaced -= 1
+    random /= random.mean()
+    random -= 1
+    recon = displaced - random
+    return recon
+
+
 
 if __name__=="__main__":
 
