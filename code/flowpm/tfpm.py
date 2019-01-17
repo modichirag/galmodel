@@ -160,19 +160,53 @@ def Drift(state, ai, ac, af, config, dtype=np.float32):
     state = tf.add(state, update)
     return state
 
+
+def Force2(state, ai, ac, af, config, dtype=np.float32):
+    '''Estimate new force on the particles given a state'''
+
+    #if config['B']==2:
+    ncp = config['nc']
+    config2 = config['config2']
+    bs, nc= config2['boxsize'], config2['nc']
+    wts = tf.ones(state.shape[1])
+    
+    rho = tf.zeros((nc, nc, nc))
+    nbar = ncp**3/nc**3
+
+    rho = cic_paint(rho, tf.multiply(state[0], nc/bs), wts)
+    rho = tf.multiply(rho, 1/nbar)  ###I am not sure why this is not needed here
+    delta_k = r2c3d(rho, norm=nc**3)
+
+    print(delta_k.shape)
+    fac = dtype(1.5 * config2['cosmology'].Om0)
+    update = longrange(config2, tf.multiply(state[0], nc/bs), delta_k, split=0, factor=fac)
+    
+    update = tf.expand_dims(update, axis=0)
+    print(update.shape)
+
+    indices = tf.constant([[2]])
+    shape = state.shape
+    update = tf.scatter_nd(indices, update, shape)
+    mask = tf.stack((tf.ones_like(state[0]), tf.ones_like(state[0]), tf.zeros_like(state[0])), axis=0)
+    state = tf.multiply(state, mask)
+    state = tf.add(state, update)
+    return state
+    
+
+
 def Force(state, ai, ac, af, config, dtype=np.float32):
     '''Estimate new force on the particles given a state'''
     bs, nc = config['boxsize'], config['nc']
-    rho = tf.zeros((nc, nc, nc))
+    ncf = config['f_config']['nc']
+    rho = tf.zeros((ncf, ncf, ncf))
     wts = tf.ones(nc**3)
-    nbar = nc**3/bs**3
+    nbar = nc**3/ncf**3
 
-    rho = cic_paint(rho, tf.multiply(state[0], nc/bs), wts)
-    ##rho = tf.multiply(rho, 1/nbar)  ###I am not sure why this is not needed here
-    delta_k = r2c3d(rho, norm=nc**3)
+    rho = cic_paint(rho, tf.multiply(state[0], ncf/bs), wts)
+    rho = tf.multiply(rho, 1/nbar)  ###I am not sure why this is not needed here
+    delta_k = r2c3d(rho, norm=ncf**3)
     fac = dtype(1.5 * config['cosmology'].Om0)
-    update = longrange(config, tf.multiply(state[0], nc/bs), delta_k, split=0, factor=fac)
-    
+    update = longrange(config['f_config'], tf.multiply(state[0], ncf/bs), delta_k, split=0, factor=fac)  
 
     update = tf.expand_dims(update, axis=0)
 
@@ -214,11 +248,13 @@ def leapfrog(stages):
         p = a1
 
 
-def nbody(state, config, verbose=False, name=None):
+def nbody(state, config, verbose=False, name=None, B=1):
     '''Do the nbody evolution'''
     stepping = leapfrog(config['stages'])
+    #if B==1: actions = {'F':Force, 'K':Kick, 'D':Drift}
+    #elif B==2: actions = {'F':Force2, 'K':Kick, 'D':Drift}
     actions = {'F':Force, 'K':Kick, 'D':Drift}
-    
+
     for action, ai, ac, af in stepping:
         if verbose: print(action, ai, ac, af)
         state = actions[action](state, ai, ac, af, config)

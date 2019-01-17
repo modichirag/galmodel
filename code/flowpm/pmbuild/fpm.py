@@ -311,6 +311,7 @@ if __name__=="__main__":
     seeds = np.arange(100, 1100, 100)
 
     for seed in seeds:
+        print('\nDo for seed = %d\n'%seed)
         #Setup
         conf = Config(bs=bs, nc=nc, seed=seed)
         pm = conf.pm
@@ -323,9 +324,10 @@ if __name__=="__main__":
         conf['grid'] = grid
 
         #PM
-        whitec = pm.generate_whitenoise(seed, mode='complex', unitary=False)
-        lineark = whitec.apply(lambda k, v:Planck15.get_pklin(sum(ki ** 2 for ki in k)**0.5, 0) ** 0.5 * v / v.BoxSize.prod() ** 0.5)
-        linear = lineark.c2r()
+        #whitec = pm.generate_whitenoise(seed, mode='complex', unitary=False)
+        #lineark = whitec.apply(lambda k, v:Planck15.get_pklin(sum(ki ** 2 for ki in k)**0.5, 0) ** 0.5 * v / v.BoxSize.prod() ** 0.5)
+        #linear = lineark.c2r()
+        linear = BigFileMesh('/project/projectdirs/astro250/chmodi/cosmo4d/data/z00/L0400_N0128_S0100_05step/mesh/', 's').paint()
         lineark = linear.r2c()
         state = solver.lpt(lineark, grid, conf['stages'][0], order=2)
         solver.nbody(state, leapfrog(conf['stages']))

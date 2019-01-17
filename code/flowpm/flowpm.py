@@ -14,7 +14,7 @@ from tfpmconfig import Config
 
 
 pkfile = './Planck15_a1p00.txt'
-config = Config(bs=100, nc=32, seed=100, pkfile=pkfile)
+config = Config(bs=400, nc=128, seed=100, pkfile=pkfile)
 bs, nc = config['boxsize'], config['nc']
 grid = bs/nc*np.indices((nc, nc, nc)).reshape(3, -1).T.astype(np.float32)
 config['grid'] = grid
@@ -63,7 +63,7 @@ with tf.Session(graph=g) as sess:
     linmesh, finmesh, fstate,istate = sess.run([linear, final, fnstate, icstate])
 #     linmesh, finmesh, fstate,istate = sess.run([linear, final, fnstate, icstate])
 
-print(fstate)
+print(fstate[0])
 print(linmesh)
 print(finmesh)
 
