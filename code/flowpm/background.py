@@ -341,6 +341,6 @@ class RadiationDominated(Perturbation):
         return self._cosmo.Omega_b(z) + self._cosmo.Omega_cdm(z) # non-relativistic 
 
 
-PerturbationGrowth = RadiationDominated
-#PerturbationGrowth = MatterDominated
+#PerturbationGrowth = RadiationDominated
+PerturbationGrowth = MatterDominated
 

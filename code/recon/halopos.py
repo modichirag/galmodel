@@ -22,7 +22,8 @@ from standardrecon import standardinit
 import diagnostics as dg
 
 pad = 2
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-logistic/module/1546529135/likelihood/'
+#modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-logistic/module/1546529135/likelihood/'
+modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-logistic128-fpm/module/1547706499/likelihood/'
 #modpath = '/home/chmodi/Projects/galmodel/code/models/n10/poisson/module/1547165819/likelihood/'
 dpath = './../../data/z00/'
 ftype = 'L%04d_N%04d_S%04d_%02dstep/'
@@ -30,7 +31,7 @@ ftype = 'L%04d_N%04d_S%04d_%02dstep/'
 
 
 
-def reconmodel(config, data, sigma=0.01**0.5, maxiter=100, gtol=1e-5, anneal=True):
+def reconmodel(config, data, sigma=0.01**0.5, maxiter=100, gtol=1e-5, anneal=True, resnorm=3):
 
     bs, nc = config['boxsize'], config['nc']
     kmesh = sum(kk**2 for kk in config['kvec'])**0.5
@@ -82,8 +83,8 @@ def reconmodel(config, data, sigma=0.01**0.5, maxiter=100, gtol=1e-5, anneal=Tru
         priormesh = tf.square(tf.cast(tf.abs(lineark), tf.float32))
         prior = tf.reduce_sum(tf.multiply(priormesh, 1/priorwt))
         prior = tf.multiply(prior, 1/nc**3, name='prior')
-
-        chisq = tf.multiply(residual, 1/nc**0, name='chisq')
+        #
+        chisq = tf.multiply(residual, 1/nc**resnorm, name='chisq')
 
         loss = tf.add(chisq, prior, name='loss')
         
@@ -100,63 +101,6 @@ def reconmodel(config, data, sigma=0.01**0.5, maxiter=100, gtol=1e-5, anneal=Tru
 
 
 
-##def savefig(truemesh, reconmesh, fname, hgraph):
-##
-##    truelin, truefin, truedata = truemesh
-##    with tf.Session(graph=hgraph) as session2:
-##        session2.run(tf.global_variables_initializer())
-##        g2 = session2.graph
-##        linmesh_t = g2.get_tensor_by_name('linmesh:0')
-##        datamesh_t = g2.get_tensor_by_name('datamesh:0')
-##        linear_t = g2.get_tensor_by_name('linear:0')
-##        final_t = g2.get_tensor_by_name('final:0')
-##        samples_t = g2.get_tensor_by_name('samples:0')
-##
-##        linear, final, data = session2.run([linear_t, final_t, samples_t],
-##                                             {linmesh_t:reconmesh, datamesh_t:np.expand_dims(reconmesh, -1)*0})
-##
-##    fig, ax = plt.subplots(3, 3, figsize = (12, 8))
-##    meshes = [[truelin, linear], [truefin, final], [truedata, data]]
-##    labels = ['Linear', 'Final', 'Data']
-##    for i in range(3):
-##        m1, m2 = meshes[i][0], meshes[i][1]
-##        k, pt = tools.power(1+m1, boxsize=bs)
-##        k, pr = tools.power(1+m2, boxsize=bs)
-##        k, px = tools.power(1+m1, 1+m2, boxsize=bs)
-##        ax[0, 0].semilogx(k, px/(pr*pt)**.5, 'C%d'%i, label=labels[i])
-##        ax[0, 1].semilogx(k, pr/pt, 'C%d'%i)
-##        ax[0, 2].loglog(k, pt, 'C%d'%i)
-##        ax[0, 2].loglog(k, pr, 'C%d--'%i)
-##        ax[1, i].imshow(m1.sum(axis=0))
-##        ax[2, i].imshow(m2.sum(axis=0))
-##    ax[1, 0].set_ylabel('Truth')
-##    ax[2, 0].set_ylabel('Recon')
-##    ax[0, 0].set_title('Cross Correlation')
-##    ax[0, 1].set_title('Transfer Function')
-##    ax[0, 2].set_title('Powers')
-##    ax[0, 0].legend()
-##    for axis in ax.flatten(): axis.grid(which='both', lw=0.5, color='gray')
-##    fig.tight_layout()
-##    fig.savefig(fname)
-##
-
-
-
-##def savefig(truemesh, reconmesh, fname):
-##    fig, ax = plt.subplots(2, 3, figsize = (12, 8))
-##    k, pt = tools.power(1+truemesh, boxsize=bs)
-##    k, pr = tools.power(1+reconmesh, boxsize=bs)
-##    k, px = tools.power(1+truemesh, 1+reconmesh, boxsize=bs)
-##    ax[0, 0].semilogx(k, px/(pr*pt)**.5, 'C0')
-##    ax[1, 0].semilogx(k, pr/pt, 'C0')
-##    ax[0, 1].loglog(k, pt)
-##    ax[1, 1].loglog(k, pr)
-##    ax[0, 2].imshow(truemesh.sum(axis=0))
-##    ax[1, 2].imshow(reconmesh.sum(axis=0))
-##    for axis in ax.flatten(): axis.grid(which='both', lw=0.5, color='gray')
-##    fig.tight_layout()
-##    fig.savefig(fname)
-##
 
 def loss_callback(var, literals, nprint=50, nsave=50, maxiter=500, t0=time()):
     losses = literals['losses']
@@ -168,14 +112,16 @@ def loss_callback(var, literals, nprint=50, nsave=50, maxiter=500, t0=time()):
     if nit % nprint == 0:
         print('Time taken for iterations %d = '%nit, time() - t0)
         print(nit, " - Loss, chisq, prior, grad : ", loss)
-    if nit % nsave == 0:
-        np.save(optfolder + '/iter%d.f4'%nit, mesh)
-        np.savetxt(optfolder + '/losses.txt', np.array(losses))
-
         truemesh = literals['truemeshes']
         reconmesh = mesh
         fname = optfolder + '/%d.png'%nit
-        dg.savehalofig(truemesh, reconmesh, fname, literals['hgraph'])
+        stime = time()
+        dg.savehalofig(truemesh, reconmesh, fname, literals['hgraph'], boxsize=bs, title='%s'%loss)
+        print('Time taken to make figure = ', time()-stime)
+        
+    if nit % nsave == 0:
+        np.save(optfolder + '/iter%d.f4'%nit, mesh)
+        np.savetxt(optfolder + '/losses.txt', np.array(losses))
 
 
 
@@ -196,12 +142,13 @@ if __name__=="__main__":
     maxiter = 500
     gtol = 1e-8
     sigma = 1**0.5
-    nprint, nsave = 10, 10
+    nprint, nsave = 10, 50
     anneal = False
     R0s = [4, 2, 1, 0]
-
+    resnorm = 0
+    
     #output folder
-    suffix = 'nc0norm2/'
+    suffix = 'nc%dnorm-fpm/'%(resnorm)
     ofolder = './saved/L%04d_N%04d_S%04d_n%02d/'%(bs, nc, seed, numd*1e4)
     if anneal : ofolder += 'anneal%d/'%len(R0s)
     else: ofolder += '/noanneal/'
@@ -212,8 +159,12 @@ if __name__=="__main__":
     pkfile = '../flowpm/Planck15_a1p00.txt'
     config = Config(bs=bs, nc=nc, seed=seed, pkfile=pkfile)
     hgraph = dg.graphlintomod(config, modpath, pad=pad, ny=1)
+    print('Diagnostic graph constructed')
+    fname = open(ofolder+'/README', 'w', 1)
+    fname.write('Using module from path - %s n'%modpath)
+    fname.close()
 
-
+    
     #Generate Data
     truth = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/s/')
     print(truth.shape)
@@ -232,9 +183,7 @@ if __name__=="__main__":
     #Do reconstruction here
     print('\nDo reconstruction\n')
 
-    #if anneal: recong = reconmodelanneal(config, data, sigma=sigma, maxiter=maxiter)
-    #else: recong = reconmodel(config, data, sigma=sigma, maxiter=maxiter)
-    recong = reconmodel(config, data, sigma=sigma, maxiter=maxiter, gtol=gtol, anneal=anneal)    
+    recong = reconmodel(config, data, sigma=sigma, maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm)    
     #
     
     initval = None

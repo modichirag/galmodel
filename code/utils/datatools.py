@@ -1,6 +1,7 @@
 import numpy as np
-
-
+import os
+import tools
+package_path = os.path.dirname(os.path.abspath(__file__))
 
 def randomvoxels(ftlist, targetlist, num_cubes, max_offset, cube_size=32, cube_sizeft=32, seed=100, rprob=0.0):
     '''Generate 'num_cubes' training voxels of 'cube_size' for target and 'cube_sizeft' for features
@@ -92,18 +93,6 @@ def splitvoxels(ftlist, cube_size, shift=None, ncube=None):
     return inp
 
 
-#    predict = np.zeros_like(mesh)
-#    counter = 0 
-#    for i in range(nshift):
-#        for j in range(nshift):
-#            for k in range(nshift):
-#                x1, y1, z1 = i*shift, j*shift, k*shift
-#                x2, y2, z2 = x1+shift, y1+shift, z1+shift
-#                predict[x1:x2,y1:y2, z1:z2] = recp[counter, shift//2:-shift//2, shift//2:-shift//2, shift//2:-shift//2, 0]
-#                counter +=1
-#
-
-
 
 def readperiodic(ar, coords):
     '''
@@ -155,63 +144,44 @@ def uncubify(arr, oldshape):
 
 
 
-###num_cubes= 500
-###cube_sizes = np.array([8, 16, 32, 64]).astype(int)
-###nsizes = len(cube_sizes)
-###pad = int(2)
-###cube_sizesft = (cube_sizes + 2*pad).astype(int)
-###max_offset = ncp - cube_sizes
-###ftname = ['cic']
-###tgname = ['pnn']
-###
-###def gentrainingdata(path, bs, nc, ftname, tgname, seeds, cube_sizes, num_cubes, pad, gal=True):
-###
-###    meshes = {}
-###    cube_features, cube_target = [[] for i in range(len(cube_sizes))], [[] for i in range(len(cube_sizes))]
-###
-###    for seed in seeds:
-###        mesh = {}
-###        partp = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'dynamic/1/Position/')
-###        mesh['cic'] = tools.paintcic(partp, bs, ncp)
-###
-###        hmesh = {}
-###        if gal:
-###            hpath = path + ftype%(bs, ncf, seed, stepf) + 'galaxies_n05/galcat/'
-###            hposd = tools.readbigfile(hpath + 'Position/')
-###            massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
-###            galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
-###            hmesh['pnn'] = tools.paintnn(hposd, bs, ncp)
-###            #hmesh['mnn'] = tools.paintnn(hposd, bs, ncp, massd)
-###            hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, ncp)
-###            hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, ncp)
-###        else:
-###            hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
-###            hposd = hposall[:num].copy()
-###            massd = massall[:num].copy()
-###            hmesh['pnn'] = tools.paintnn(hposd, bs, ncp)
-###            
-###        meshes[seed] = [mesh, hmesh]
-###
-###        print('All the mesh have been generated for seed = %d'%seed)
-###
-###        #Create training voxels
-###        ftlist = [mesh[i].copy() for i in ftname]
-###        ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
-###    #     targetmesh = hmesh['pnn']
-###        targetmesh = [hmesh['pnncen'], hmesh['pnnsat']]
-###        ntarget = len(targetmesh)
-###
-###        for i, size in enumerate(cube_sizes):
-###            numcubes = int(num_cubes/size*4)
-###            features, target = dtools.randomvoxels(ftlistpad, targetmesh, numcubes, max_offset[i], 
-###                                                size, cube_sizesft[i], seed=seed, rprob=0)
-###            cube_features[i] = cube_features[i] + features
-###            cube_target[i] = cube_target[i] + target
-###
-###    # #
-###    for i in range(cube_sizes.size):
-###        cube_target[i] = np.stack(cube_target[i],axis=0)
-###        cube_features[i] = np.stack(cube_features[i],axis=0)
-###        print(cube_features[i].shape, cube_target[i].shape)
-###
-###
+
+def gethalomesh(bs, nc, seed, step=5, ncf=512, stepf=40, masswt=False, numd=1e-3, gridding='nn', path=None):
+
+    if path is None: path = package_path + '/../../data/z00/'
+    ftype = 'L%04d_N%04d_S%04d_%02dstep/'
+
+    num = int(numd * bs**3)
+    hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
+    massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:]    
+    hposd = hposall[:num]
+    massd = massall[:num].reshape(-1)*1e10
+    if masswt: mass = massd
+    else: mass = np.ones_like(massd)
+
+    if gridding == 'nn': hmesh = tools.paintnn(hposd, bs, nc, mass=mass)
+    else: hmesh = tools.paintcic(hposd, bs, nc, weights=mass)
+    return hmesh
+            
+    
+
+def getgalmesh(bs, nc, seed, step=5, ncf=512, stepf=40, masswt=False,  gridding='nn', path=None):
+
+    if path is None: path = package_path + '/../../data/z00/'
+    ftype = 'L%04d_N%04d_S%04d_%02dstep/'
+
+    hpath = path + ftype%(bs, ncf, seed, stepf) + 'galaxies_n05/galcat/'
+    hposd = tools.readbigfile(hpath + 'Position/')
+    massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
+    galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
+    if masswt: mass = massd
+    else: mass = np.ones_like(massd)
+
+    if gridding == 'nn':
+        gmesh = tools.paintnn(hposd, bs, nc, mass=mass)
+        satmesh = tools.paintnn(hposd[galtype], bs, nc, mass=mass[galtype])
+        cenmesh = tools.paintnn(hposd[~galtype], bs, nc, mass=mass[~galtype])
+    else:
+        gmesh = tools.paintcic(hposd, bs, nc, mass=mass)
+        satmesh = tools.paintcic(hposd[galtype], bs, nc, mass=mass[galtype])
+        cenmesh = tools.paintcic(hposd[~galtype], bs, nc, mass=mass[~galtype])
+    return cenmesh, satmesh, gmesh

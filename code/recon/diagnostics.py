@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 import numpy
 import os, sys
 
-#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import tensorflow as tf
-#import tensorflow_hub as hub
+import tensorflow_hub as hub
 
 sys.path.append('../flowpm/')
 from background import *
@@ -130,9 +130,12 @@ def genlintomod(config, modpath, linmesh, datamesh, pad=False):
 
 
 
-def savehalofig(truemesh, reconmesh, fname, hgraph):
-
+def savehalofig(truemesh, reconmesh, fname, hgraph, boxsize, title=''):
+    '''Given a graph, list of 3 fields in truemesh & recon-init
+    create the diagnostic figure,  3X3
+    '''
     truelin, truefin, truedata = truemesh
+
     with tf.Session(graph=hgraph) as sessionh:
         sessionh.run(tf.global_variables_initializer())
         gh = sessionh.graph
@@ -150,28 +153,36 @@ def savehalofig(truemesh, reconmesh, fname, hgraph):
     labels = ['Linear', 'Final', 'Data']
     for i in range(3):
         m1, m2 = meshes[i][0], meshes[i][1]
-        k, pt = tools.power(1+m1, boxsize=bs)
-        k, pr = tools.power(1+m2, boxsize=bs)
-        k, px = tools.power(1+m1, 1+m2, boxsize=bs)
+        if m1.mean() < 1e-6:
+            m1, m2 = m1+1, m2+1
+        k, pt = tools.power(m1, boxsize=boxsize)
+        k, pr = tools.power(m2, boxsize=boxsize)
+        k, px = tools.power(m1, m2, boxsize=boxsize)
         ax[0, 0].semilogx(k, px/(pr*pt)**.5, 'C%d'%i, label=labels[i])
         ax[0, 1].semilogx(k, pr/pt, 'C%d'%i)
         ax[0, 2].loglog(k, pt, 'C%d'%i)
         ax[0, 2].loglog(k, pr, 'C%d--'%i)
-        ax[1, i].imshow(m1.sum(axis=0))
-        ax[2, i].imshow(m2.sum(axis=0))
-    ax[1, 0].set_ylabel('Truth')
-    ax[2, 0].set_ylabel('Recon')
+        ax[1, i].imshow(m2.sum(axis=0))
+        ax[2, i].imshow(m1.sum(axis=0))
+    ax[2, 0].set_ylabel('Truth')
+    ax[1, 0].set_ylabel('Recon')
     ax[0, 0].set_title('Cross Correlation')
+    ax[0, 0].set_ylim(-0.1, 1.1)
     ax[0, 1].set_title('Transfer Function')
+    ax[0, 1].set_ylim(-0.1, 2)
     ax[0, 2].set_title('Powers')
+    ax[0, 2].set_ylim(1, 1e5)
     ax[0, 0].legend()
     for axis in ax.flatten(): axis.grid(which='both', lw=0.5, color='gray')
-    fig.tight_layout()
+    fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(fname)
 
 
 def savehalofig2(truemesh, reconmesh, fname, hgraph):
-
+    '''Given a graph, list of 3 fields in truemesh & recon-init
+    create the diagnostic figure, 4X3
+    '''
     truelin, truefin, truedata = truemesh
     with tf.Session(graph=hgraph) as sessionh:
         sessionh.run(tf.global_variables_initializer())
@@ -208,11 +219,14 @@ def savehalofig2(truemesh, reconmesh, fname, hgraph):
     ax[1, 0].set_ylabel('Truth')
     ax[2, 0].set_ylabel('Recon')
     ax[0, 0].set_title('Cross Correlation')
+    ax[0, 0].set_ylim(-0.1, 1.1)
     ax[0, 1].set_title('Transfer Function')
+    ax[0, 1].set_ylim(-0.1, 2)
     ax[0, 2].set_title('Powers')
+    ax[0, 2].set_ylim(1, 1e5)
     ax[0, 0].legend()
     for axis in ax.flatten(): axis.grid(which='both', lw=0.5, color='gray')
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(fname)
 
 
@@ -277,7 +291,7 @@ if __name__=="__main__":
 #    truedata = dtools.gethalomesh(bs, nc, seed).astype(np.float32)
 #    
 #    g = graphlintomod(config, modpath, pad=2, ny=1)
-#    savehalofig2([truelin, truefin, truedata], truelin, fname='./figs/genlintohpos2.png', hgraph=g)
+#    savehalofig2([truelin, truefin, truedata], truelin, fname='./figs/genlintohpos2.png', hgraph=g, boxsize=bs)
 #    
 #    linear, final, data = genlintomod(config, modpath, truelin, np.expand_dims(truedata, -1)*0, pad=2)
 #    fig, axar = plt.subplots(2, 3, figsize = (12, 8))

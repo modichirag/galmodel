@@ -35,6 +35,7 @@ ncp = 128
 step, stepf = 5, 40
 path = '../../data/z00/'
 ftype = 'L%04d_N%04d_S%04d_%02dstep/'
+ftypefpm = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
 numd = 1e-3
 num = int(numd*bs**3)
 R1 = 3
@@ -46,9 +47,9 @@ rprob = 0.5
 
 #############################
 
-suff = 'pad2_32'
+suff = 'pad2-logistic128-fpm'
 fname = open('../models/n10/README', 'a+', 1)
-fname.write('%s \t :\n\tModel to predict halo position likelihood in  trainestmodvarhalo.py with data supplemented by size=32 only; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. Changed teh n_y=1 and high of quntized distribution to 4\n'%suff)
+fname.write('%s \t :\n\tModel to predict halo position likelihood in  trainestmodvarhalo.py with data supplemented by size=8, 16, 32, 64, 128 only; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. Changed teh n_y=1 and high of quntized distribution to 4\n'%suff)
 fname.close()
 
 savepath = '../models/n10/%s/'%suff
@@ -60,8 +61,8 @@ except: pass
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
 num_cubes= 500
-#cube_sizes = np.array([8, 16, 32, 64, 128]).astype(int)
-cube_sizes = np.array([32]).astype(int)
+cube_sizes = np.array([8, 16, 32, 64, 128]).astype(int)
+#cube_sizes = np.array([32]).astype(int)
 nsizes = len(cube_sizes)
 pad = int(2)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
@@ -86,7 +87,7 @@ def generate_training_data():
 
     for seed in seeds:
         mesh = {}
-        partp = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'dynamic/1/Position/')
+        partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
         mesh['cic'] = tools.paintcic(partp, bs, ncp)
         #mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
         mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
@@ -143,19 +144,6 @@ meshes, cube_features, cube_target = generate_training_data()
 
 
 
-##
-##
-##
-###Save a snapshot of features
-##fig, ax = plt.subplots(1, nchannels+1, figsize = (nchannels*4+4, 5))
-##n = 10
-##for i in range(nchannels):
-##    ax[i].imshow(cube_features[n][:,:,:,i].sum(axis=0))
-##    ax[i].set_title(ftname[i])
-##ax[-1].imshow(cube_target[n][:,:,:,0].sum(axis=0))
-##ax[-1].set_title('Target')
-##plt.savefig('./figs/n%02d/features%s.png'%(numd*1e4, suff))
-##
 #############################
 ### Model
 def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
@@ -242,9 +230,8 @@ def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
             values = [0.00001, 0.000005, 0.000001, 0.0000005, 0.0000001]
             learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
             train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
-                                        
+            tf.summary.scalar('rate', learning_rate)                            
         tf.summary.scalar('loss', neg_log_likelihood)
-        tf.summary.scalar('rate', learning_rate)
     elif mode == tf.estimator.ModeKeys.EVAL:
         
         eval_metric_ops = { "log_p": neg_log_likelihood}
@@ -294,7 +281,7 @@ def mapping_function(inds):
         
         isize = np.random.choice(len(cube_sizes), 1, replace=True)[0]
         batch = int(batch_size*8/cube_sizes[isize])
-        if isize == cube_sizes[isize]==nc : batch = 1
+        if cube_sizes[isize]==nc : batch = 1
         inds = inds[:batch]
         trainingsize = cube_features[isize].shape[0]
         inds[inds >= trainingsize] =  (inds[inds >= trainingsize])%trainingsize
@@ -439,7 +426,7 @@ fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-for max_steps in np.array([5e3, 1e4, 2e4, 3e4]).astype(int):
+for max_steps in np.array([5e3, 1e4, 2e4, 3e4, 4e4, 5e4, 6e4, 7e4]).astype(int):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
