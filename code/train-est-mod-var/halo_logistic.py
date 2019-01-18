@@ -47,9 +47,9 @@ rprob = 0.5
 
 #############################
 
-suff = 'pad2-logistic128-fpm'
+suff = 'pad2-logistic128-fpm-2ft'
 fname = open('../models/n10/README', 'a+', 1)
-fname.write('%s \t :\n\tModel to predict halo position likelihood in  trainestmodvarhalo.py with data supplemented by size=8, 16, 32, 64, 128 only; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. Changed teh n_y=1 and high of quntized distribution to 4\n'%suff)
+fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Use 2 features- cic and GD\n'%suff)
 fname.close()
 
 savepath = '../models/n10/%s/'%suff
@@ -67,7 +67,7 @@ nsizes = len(cube_sizes)
 pad = int(2)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = ncp - cube_sizes
-ftname = ['cic']
+ftname = ['cic', 'GD']
 tgname = ['pnn']
 nchannels = len(ftname)
 ntargets = len(tgname)
@@ -91,8 +91,8 @@ def generate_training_data():
         mesh['cic'] = tools.paintcic(partp, bs, ncp)
         #mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
         mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
-        #mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
-        #mesh['GD'] = mesh['R1'] - mesh['R2']
+        mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
+        mesh['GD'] = mesh['R1'] - mesh['R2']
 
         hmesh = {}
         hpath = path + ftype%(bs, ncf, seed, stepf) + 'FOF/'
@@ -226,8 +226,8 @@ def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             global_step=tf.train.get_global_step()
-            boundaries = [10000, 20000, 30000, 40000]
-            values = [0.00001, 0.000005, 0.000001, 0.0000005, 0.0000001]
+            boundaries = list(np.array([1e4, 2e4, 3e4, 4e4]).astype(int))
+            values = [1e-3, 1e-4, 1e-5, 5e-5, 1e-6]
             learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
             train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
             tf.summary.scalar('rate', learning_rate)                            
@@ -358,11 +358,11 @@ def check_module(modpath):
         sess.run(tf.initializers.global_variables())
 
         for seed in seeds:
-            xxm = np.pad(meshes[seed][0]['cic'] , pad, 'wrap')
+            xxm = np.stack([np.pad(meshes[seed][0][i], pad, 'wrap') for i in ftname], axis=-1)
             #yym = np.stack([np.pad(meshes[seed][1]['pnncen'], pad, 'wrap'), np.pad(meshes[seed][1]['pnnsat'], pad, 'wrap')], axis=-1)
             yym = np.stack([meshes[seed][1][i] for i in tgname], axis=-1)
             print(xxm.shape, yym.shape)
-            preds[seed] = sess.run(samples, feed_dict={xx:np.expand_dims(np.expand_dims(xxm,  -1), 0), yy:np.expand_dims(yym, 0)})
+            preds[seed] = sess.run(samples, feed_dict={xx:np.expand_dims(xxm, 0), yy:np.expand_dims(yym, 0)})
             meshes[seed][0]['predict'] = preds[seed][:, :, :]
 
 
@@ -426,7 +426,7 @@ fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-for max_steps in np.array([5e3, 1e4, 2e4, 3e4, 4e4, 5e4, 6e4, 7e4]).astype(int):
+for max_steps in np.array([50, 5e3, 1e4, 2e4, 3e4, 4e4, 5e4]).astype(int):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
