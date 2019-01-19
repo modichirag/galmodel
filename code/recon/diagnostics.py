@@ -148,6 +148,45 @@ def savehalofig(truemesh, reconmesh, fname, hgraph, boxsize, title=''):
         linear, final, data = sessionh.run([linear_t, final_t, samples_t],
                                              {linmesh_t:reconmesh, datamesh_t:np.expand_dims(truedata, -1)*0})
 
+    reconmeshlist = [linear, final, data]
+    makefig(truemesh, reconmeshlist, fname, boxsize, title)
+    
+##    fig, ax = plt.subplots(3, 3, figsize = (12,12))
+##    meshes = [[truelin, linear], [truefin, final], [truedata, data]]
+##    labels = ['Linear', 'Final', 'Data']
+##    for i in range(3):
+##        m1, m2 = meshes[i][0], meshes[i][1]
+##        if m1.mean() < 1e-6:
+##            m1, m2 = m1+1, m2+1
+##        k, pt = tools.power(m1, boxsize=boxsize)
+##        k, pr = tools.power(m2, boxsize=boxsize)
+##        k, px = tools.power(m1, m2, boxsize=boxsize)
+##        ax[0, 0].semilogx(k, px/(pr*pt)**.5, 'C%d'%i, label=labels[i])
+##        ax[0, 1].semilogx(k, pr/pt, 'C%d'%i)
+##        ax[0, 2].loglog(k, pt, 'C%d'%i)
+##        ax[0, 2].loglog(k, pr, 'C%d--'%i)
+##        ax[1, i].imshow(m2.sum(axis=0))
+##        ax[2, i].imshow(m1.sum(axis=0))
+##    ax[2, 0].set_ylabel('Truth')
+##    ax[1, 0].set_ylabel('Recon')
+##    ax[0, 0].set_title('Cross Correlation')
+##    ax[0, 0].set_ylim(-0.1, 1.1)
+##    ax[0, 1].set_title('Transfer Function')
+##    ax[0, 1].set_ylim(-0.1, 2)
+##    ax[0, 2].set_title('Powers')
+##    ax[0, 2].set_ylim(1, 1e5)
+##    ax[0, 0].legend()
+##    for axis in ax.flatten(): axis.grid(which='both', lw=0.5, color='gray')
+##    fig.suptitle(title)
+##    fig.tight_layout(rect=[0, 0, 1, 0.95])
+##    fig.savefig(fname)
+##
+def makefig(truemesh, reconmesh, fname, boxsize, title=''):
+    '''Given a graph, list of 3 fields in truemesh & recon-init
+    create the diagnostic figure,  3X3
+    '''
+    truelin, truefin, truedata = truemesh
+    linear, final, data = reconmesh
     fig, ax = plt.subplots(3, 3, figsize = (12,12))
     meshes = [[truelin, linear], [truefin, final], [truedata, data]]
     labels = ['Linear', 'Final', 'Data']
