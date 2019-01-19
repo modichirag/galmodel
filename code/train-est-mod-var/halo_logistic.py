@@ -43,14 +43,15 @@ R2 = 3*1.2
 kny = np.pi*ncp/bs
 kk = tools.fftk((ncp, ncp, ncp), bs)
 seeds = [100, 200, 300, 400]
+vseeds = [100, 300, 800, 900]
 rprob = 0.5
 
 #############################
 
-suff = 'pad2-logistic128-fpm-2ft'
-fname = open('../models/n10/README', 'a+', 1)
-fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Use 2 features- cic and GD\n'%suff)
-fname.close()
+suff = 'pad2-logistic128-fpm'
+#fname = open('../models/n10/README', 'a+', 1)
+#fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
+#fname.close()
 
 savepath = '../models/n10/%s/'%suff
 #if not os.path.exists(savepath):
@@ -67,7 +68,7 @@ nsizes = len(cube_sizes)
 pad = int(2)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = ncp - cube_sizes
-ftname = ['cic', 'GD']
+ftname = ['cic']
 tgname = ['pnn']
 nchannels = len(ftname)
 ntargets = len(tgname)
@@ -81,34 +82,41 @@ print('Rotation probability = %0.2f'%rprob, file=fname)
 
 
 
+def get_meshes(seed):
+    mesh = {}
+    mesh['s'] = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'mesh/s/')
+    partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
+    mesh['cic'] = tools.paintcic(partp, bs, ncp)
+    #mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
+    mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
+    mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
+    mesh['GD'] = mesh['R1'] - mesh['R2']
+
+    hmesh = {}
+    hpath = path + ftype%(bs, ncf, seed, stepf) + 'FOF/'
+    hposd = tools.readbigfile(hpath + 'PeakPosition/')
+    massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
+    #galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
+    hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
+    massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
+    hposd = hposall[:num].copy()
+    massd = massall[:num].copy()
+    #hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
+    hmesh['pnn'] = tools.paintnn(hposd, bs, ncp)
+    hmesh['mnn'] = tools.paintnn(hposd, bs, ncp, massd)
+    #hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, ncp)
+    #hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, ncp)
+
+    return mesh, hmesh
+
+
 def generate_training_data():
     meshes = {}
     cube_features, cube_target = [[] for i in range(len(cube_sizes))], [[] for i in range(len(cube_sizes))]
 
     for seed in seeds:
-        mesh = {}
-        partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
-        mesh['cic'] = tools.paintcic(partp, bs, ncp)
-        #mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
-        mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
-        mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
-        mesh['GD'] = mesh['R1'] - mesh['R2']
 
-        hmesh = {}
-        hpath = path + ftype%(bs, ncf, seed, stepf) + 'FOF/'
-        hposd = tools.readbigfile(hpath + 'PeakPosition/')
-        massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
-        #galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
-        hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
-        massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
-        hposd = hposall[:num].copy()
-        massd = massall[:num].copy()
-        #hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
-        hmesh['pnn'] = tools.paintnn(hposd, bs, ncp)
-        hmesh['mnn'] = tools.paintnn(hposd, bs, ncp, massd)
-        #hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, ncp)
-        #hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, ncp)
-
+        mesh, hmesh = get_meshes(seed)
         meshes[seed] = [mesh, hmesh]
 
         print('All the mesh have been generated for seed = %d'%seed)
@@ -116,7 +124,6 @@ def generate_training_data():
         #Create training voxels
         ftlist = [mesh[i].copy() for i in ftname]
         ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
-    #     targetmesh = hmesh['pnn']
         targetmesh = [hmesh[i].copy() for i in tgname]
 
         for i, size in enumerate(cube_sizes):
@@ -141,7 +148,8 @@ def generate_training_data():
 
 
 meshes, cube_features, cube_target = generate_training_data()
-
+vmeshes = {}
+for seed in vseeds: vmeshes[seed] = get_meshes(seed)
 
 
 #############################
@@ -226,8 +234,8 @@ def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             global_step=tf.train.get_global_step()
-            boundaries = list(np.array([1e4, 2e4, 3e4, 4e4]).astype(int))
-            values = [1e-3, 1e-4, 1e-5, 5e-5, 1e-6]
+            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
+            values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
             learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
             train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
             tf.summary.scalar('rate', learning_rate)                            
@@ -332,7 +340,7 @@ def testing_input_fn():
 
 def save_module(model, savepath, max_steps):
 
-    print('Save module')
+    print('\nSave module\n')
 
     features = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
     labels = tf.placeholder(tf.float32, shape=[None, None, None, None, ntargets], name='labels')
@@ -345,7 +353,9 @@ def save_module(model, savepath, max_steps):
 
 #####
 def check_module(modpath):
-    print('Test module')
+    
+    print('\nTest module\n')
+
     tf.reset_default_graph()
     module = hub.Module(modpath + '/likelihood/')
     xx = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
@@ -357,13 +367,13 @@ def check_module(modpath):
     with tf.Session() as sess:
         sess.run(tf.initializers.global_variables())
 
-        for seed in seeds:
-            xxm = np.stack([np.pad(meshes[seed][0][i], pad, 'wrap') for i in ftname], axis=-1)
-            #yym = np.stack([np.pad(meshes[seed][1]['pnncen'], pad, 'wrap'), np.pad(meshes[seed][1]['pnnsat'], pad, 'wrap')], axis=-1)
-            yym = np.stack([meshes[seed][1][i] for i in tgname], axis=-1)
-            print(xxm.shape, yym.shape)
+        for seed in vseeds:
+            xxm = np.stack([np.pad(vmeshes[seed][0][i], pad, 'wrap') for i in ftname], axis=-1)
+            #yym = np.stack([np.pad(vmeshes[seed][1]['pnncen'], pad, 'wrap'), np.pad(vmeshes[seed][1]['pnnsat'], pad, 'wrap')], axis=-1)
+            yym = np.stack([vmeshes[seed][1][i] for i in tgname], axis=-1)
+            print('xxm, yym shape = ', xxm.shape, yym.shape)
             preds[seed] = sess.run(samples, feed_dict={xx:np.expand_dims(xxm, 0), yy:np.expand_dims(yym, 0)})
-            meshes[seed][0]['predict'] = preds[seed][:, :, :]
+            vmeshes[seed][0]['predict'] = preds[seed][:, :, :]
 
 
     ##############################
@@ -374,9 +384,9 @@ def check_module(modpath):
 
     fig, axar = plt.subplots(2, 2, figsize = (8, 8))
     ax = axar[0]
-    for seed in seeds:
+    for seed in vseeds:
         for i, key in enumerate(['']):
-            predict, hpmeshd = meshes[seed][0]['predict%s'%key] , meshes[seed][1]['pnn%s'%key], 
+            predict, hpmeshd = vmeshes[seed][0]['predict%s'%key] , vmeshes[seed][1]['pnn%s'%key], 
             k, pkpred = tools.power(predict/predict.mean(), boxsize=bs, k=kmesh)
             k, pkhd = tools.power(hpmeshd/hpmeshd.mean(), boxsize=bs, k=kmesh)
             k, pkhx = tools.power(hpmeshd/hpmeshd.mean(), predict/predict.mean(), boxsize=bs, k=kmesh)    
@@ -387,7 +397,7 @@ def check_module(modpath):
 
     for axis in ax.flatten():
         axis.legend(fontsize=14)
-        axis.set_yticks(np.arange(0, 1.1, 0.1))
+        axis.set_yticks(np.arange(0, 1.2, 0.1))
         axis.grid(which='both')
         axis.set_ylim(0.,1.1)
     ax[0].set_ylabel('Transfer function', fontsize=14)
@@ -395,14 +405,14 @@ def check_module(modpath):
     #
     ax = axar[1]
     for i, key in enumerate([ '']):
-        predict, hpmeshd = meshes[seed][0]['predict%s'%key] , meshes[seed][1]['pnn%s'%key], 
+        predict, hpmeshd = vmeshes[seed][0]['predict%s'%key] , vmeshes[seed][1]['pnn%s'%key], 
         vmin, vmax = 0, (hpmeshd[:, :, :].sum(axis=0)).max()
         im = ax[0].imshow(predict[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
         im = ax[1].imshow(hpmeshd[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
         ax[0].set_title(key, fontsize=15)
     ax[0].set_title('Prediction', fontsize=15)
     ax[1].set_title('Truth', fontsize=15)
-    plt.savefig(savepath + '/predict%d.png'%max_steps)
+    plt.savefig(savepath + '/vpredict%d.png'%max_steps)
     plt.show()
 
 #
@@ -426,7 +436,8 @@ fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-for max_steps in np.array([50, 5e3, 1e4, 2e4, 3e4, 4e4, 5e4]).astype(int):
+for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000]:
+#for max_steps in [100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
