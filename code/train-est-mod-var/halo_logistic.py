@@ -9,16 +9,12 @@ from time import time
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
  #
 import tensorflow as tf
-import tensorflow.contrib.slim as slim
 from tensorflow.contrib.slim import add_arg_scope
 from layers import wide_resnet
 import tensorflow_hub as hub
-import tensorflow_probability
-import tensorflow_probability as tfp
-tfd = tensorflow_probability.distributions
-tfd = tfp.distributions
-tfb = tfp.bijectors
 
+
+import models
 import logging
 from datetime import datetime
 
@@ -43,11 +39,10 @@ kny = np.pi*nc/bs
 kk = tools.fftk((nc, nc, nc), bs)
 seeds = [100, 200, 300, 400]
 vseeds = [100, 300, 800, 900]
-rprob = 0.5
 
 #############################
 
-suff = 'pad2-logistic128-fpm-test'
+suff = 'pad2-logistic128-test'
 fname = open('../models/n10/README', 'a+', 1)
 fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
 fname.close()
@@ -70,8 +65,11 @@ ftname = ['cic']
 tgname = ['pnn']
 nchannels = len(ftname)
 ntargets = len(tgname)
-print('Features are ', ftname, file=fname)
 
+batch_size=64
+rprob = 0.5
+
+print('Features are ', ftname, file=fname)
 print('Pad with ', pad, file=fname)
 print('Rotation probability = %0.2f'%rprob, file=fname)
 fname.close()
@@ -92,10 +90,6 @@ def get_meshes(seed, galaxies=False):
     mesh['GD'] = mesh['R1'] - mesh['R2']
 
     hmesh = {}
-    #hpath = path + ftype%(bs, ncf, seed, stepf) + 'FOF/'
-    #hposd = tools.readbigfile(hpath + 'PeakPosition/')
-    #massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
-    #galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
     hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
     massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
     hposd = hposall[:num].copy()
@@ -103,10 +97,9 @@ def get_meshes(seed, galaxies=False):
     hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
     hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
     hmesh['mnn'] = tools.paintnn(hposd, bs, nc, massd)
-    #hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, nc)
-    #hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, nc)
 
     return mesh, hmesh
+
 
 
 def generate_training_data():
@@ -146,108 +139,8 @@ def generate_training_data():
     return meshes, cube_features, cube_target
 
 
-meshes, cube_features, cube_target = generate_training_data()
-vmeshes = {}
-for seed in vseeds: vmeshes[seed] = get_meshes(seed)
-
 
 #############################
-### Model
-def _mdn_model_fn(features, labels, n_y, n_mixture, dropout, optimizer, mode):
-
-    # Check for training mode
-    is_training = mode == tf.estimator.ModeKeys.TRAIN
-        
-    def _module_fn():
-        """
-        Function building the module
-        """
-    
-        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
-        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
-
-        # Builds the neural network
-        net = slim.conv3d(feature_layer, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
-        #net = wide_resnet(feature_layer, 8, activation_fn=tf.nn.leaky_relu, is_training=is_training)
-        net = wide_resnet(net, 16, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
-        net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
-        net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
-        net = slim.conv3d(net, 32, 3, activation_fn=tf.nn.tanh)
-
-        # Define the probabilistic layer 
-        net = slim.conv3d(net, n_mixture*3*n_y, 1, activation_fn=None)
-        cube_size = tf.shape(obs_layer)[1]
-        net = tf.reshape(net, [-1, cube_size, cube_size, cube_size, n_y, n_mixture*3])
-#         net = tf.reshape(net, [None, None, None, None, n_y, n_mixture*3])
-        loc, unconstrained_scale, logits = tf.split(net,
-                                                    num_or_size_splits=3,
-                                                    axis=-1)
-        scale = tf.nn.softplus(unconstrained_scale)
-
-        # Form mixture of discretized logistic distributions. Note we shift the
-        # logistic distribution by -0.5. This lets the quantization capture "rounding"
-        # intervals, `(x-0.5, x+0.5]`, and not "ceiling" intervals, `(x-1, x]`.
-        discretized_logistic_dist = tfd.QuantizedDistribution(
-            distribution=tfd.TransformedDistribution(
-                distribution=tfd.Logistic(loc=loc, scale=scale),
-                bijector=tfb.AffineScalar(shift=-0.5)),
-            low=0.,
-            high=2.**3-1)
-
-        mixture_dist = tfd.MixtureSameFamily(
-            mixture_distribution=tfd.Categorical(logits=logits),
-            components_distribution=discretized_logistic_dist)
-
-        # Define a function for sampling, and a function for estimating the log likelihood
-        sample = tf.squeeze(mixture_dist.sample())
-        loglik = mixture_dist.log_prob(obs_layer)
-        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
-                          outputs={'sample':sample, 'loglikelihood':loglik})
-    
-
-    # Create model and register module if necessary
-    spec = hub.create_module_spec(_module_fn)
-    module = hub.Module(spec, trainable=True)
-    if isinstance(features,dict):
-        predictions = module(features, as_dict=True)
-    else:
-        predictions = module({'features':features, 'labels':labels}, as_dict=True)
-    
-    if mode == tf.estimator.ModeKeys.PREDICT:    
-        hub.register_module_for_export(module, "likelihood")
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
-    
-    loglik = predictions['loglikelihood']
-    # Compute and register loss function
-    neg_log_likelihood = -tf.reduce_sum(loglik, axis=-1)
-    neg_log_likelihood = tf.reduce_mean(neg_log_likelihood)
-    
-    tf.losses.add_loss(neg_log_likelihood)
-    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
-
-    train_op = None
-    eval_metric_ops = None
-
-    # Define optimizer
-    if mode == tf.estimator.ModeKeys.TRAIN:
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(update_ops):
-            global_step=tf.train.get_global_step()
-            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
-            values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
-            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
-            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
-            tf.summary.scalar('rate', learning_rate)                            
-        tf.summary.scalar('loss', neg_log_likelihood)
-    elif mode == tf.estimator.ModeKeys.EVAL:
-        
-        eval_metric_ops = { "log_p": neg_log_likelihood}
-
-    return tf.estimator.EstimatorSpec(mode=mode,
-                                      predictions=predictions,
-                                      loss=total_loss,
-                                      train_op=train_op,
-                                      eval_metric_ops=eval_metric_ops)
 
 class MDNEstimator(tf.estimator.Estimator):
     """An estimator for distribution estimation using Mixture Density Networks.
@@ -264,8 +157,8 @@ class MDNEstimator(tf.estimator.Estimator):
         """
 
         def _model_fn(features, labels, mode):
-            return _mdn_model_fn(features, labels, 
-                 n_y, n_mixture, dropout,
+            return models._mdn_model_fn(features, labels, 
+                                 nchannels, n_y, n_mixture, dropout,
                                  optimizer, mode)
 
         super(self.__class__, self).__init__(model_fn=_model_fn,
@@ -274,13 +167,6 @@ class MDNEstimator(tf.estimator.Estimator):
 
 
 
-        
-#############################################################################
-###Train
-
-
-batch_size=64
-rprob = 0.5
 
 
 def mapping_function(inds):
@@ -309,10 +195,6 @@ def mapping_function(inds):
     
     ft, tg = tf.py_func(extract_batch, [inds],
                         [tf.float32, tf.float32])
-#     sft = cube_features[isize].shape
-#     stg = cube_target[isize].shape
-#     ft.set_shape((None,)+sft[1:]) 
-#     tg.set_shape((None,)+stg[1:])
     return ft, tg
 
 def training_input_fn():
@@ -332,9 +214,9 @@ def testing_input_fn():
     return dataset
 
 
-
-
-
+        
+#############################################################################
+###save
 
 
 def save_module(model, savepath, max_steps):
@@ -418,6 +300,12 @@ def check_module(modpath):
 
 
 ############################################################################
+#############---------MAIN---------################
+
+meshes, cube_features, cube_target = generate_training_data()
+vmeshes = {}
+for seed in vseeds: vmeshes[seed] = get_meshes(seed)
+
 # get TF logger
 log = logging.getLogger('tensorflow')
 log.setLevel(logging.DEBUG)
