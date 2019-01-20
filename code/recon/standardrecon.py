@@ -1,9 +1,11 @@
 import numpy as np
-import sys
+import sys, os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 sys.path.append('../flowpm/')
 sys.path.append('../utils/')
 
 import tools
+import datatools as dtools
 import tfpmfuncs, tfpm
 import tfpmconfig 
 
@@ -46,6 +48,7 @@ def standardinit(config, base, pos, final, R=8):
     bs, nc = config['boxsize'], config['nc']
     
     if abs(base.mean()) > 1e-6: 
+        print('Convert base to overdensity')
         base = (base - base.mean())/base.mean()
     pfin = tools.power(final, boxsize=bs)[1]
     ph = tools.power(1+base, boxsize=bs)[1]
@@ -79,37 +82,58 @@ if __name__=="__main__":
     #
     path = '../../data/z00/'
     ftype = 'L%04d_N%04d_S%04d_%02dstep/'
-    numd = 1e-3
-    num = int(numd*bs**3)
-    #
-    mesh = {}
-    partp = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'dynamic/1/Position/')
-    mesh['cic'] = tools.paintcic(partp, bs, nc)
-    mesh['s'] = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/s/')
+    base, pos, mass = dtools.gethalomesh(bs, nc, seed, getdata=True)
+    meshinit = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/s/')
+    meshfin = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/d/')
 
-    hmesh = {}
-    hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]
-    hposd = hposall[:num].copy()
-    hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
-    hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
+    recon = standardinit(config, base, pos, meshfin, R=8)
 
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(2, 2, figsize=(9, 9))
+    ax[0, 0].imshow(meshinit.sum(axis=0))
+    ax[0, 1].imshow(meshfin.sum(axis=0))
+    ax[1, 0].imshow(base.sum(axis=0))
+    ax[1, 1].imshow(recon.sum(axis=0))
+    plt.savefig('./figs/standard.png')
+    
+#    mesh['cic'] = tools.paintcic(partp, bs, nc)
+#    mesh['s'] = 
+#    
+#    path = '../../data/z00/'
+#    ftype = 'L%04d_N%04d_S%04d_%02dstep/'
+#    numd = 1e-3
+#    num = int(numd*bs**3)
+#    #
+#    mesh = {}
+#    partp = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'dynamic/1/Position/')
+#    mesh['cic'] = tools.paintcic(partp, bs, nc)
+#    mesh['s'] = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/s/')
+#
+#    hmesh = {}
+#    hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]
+#    hposd = hposall[:num].copy()
+#    hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
+#    hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
+#
+#
+#    ##
+#    base = hmesh['pcic']
+#    base = (base - base.mean())/base.mean()
+#    pfin = tools.power(mesh['cic'], boxsize=bs)[1]
+#    ph = tools.power(1+base, boxsize=bs)[1]
+#    bias = ((ph[1:5]/pfin[1:5])**0.5).mean()
+#    print(bias)
+#
+#    g = standardrecon(config, base, hposd, bias, R=8)
+#
+#    with tf.Session(graph=g) as sess:
+#        sess.run(tf.global_variables_initializer())
+#        tfdisplaced = g.get_tensor_by_name('displaced:0')
+#        tfrandom = g.get_tensor_by_name('random:0')
+#
+#        displaced, random = sess.run([tfdisplaced, tfrandom])
+#
+#    print(displaced)
+#    print(random)
 
-    ##
-    base = hmesh['pcic']
-    base = (base - base.mean())/base.mean()
-    pfin = tools.power(mesh['cic'], boxsize=bs)[1]
-    ph = tools.power(1+base, boxsize=bs)[1]
-    bias = ((ph[1:5]/pfin[1:5])**0.5).mean()
-    print(bias)
-
-    g = standardrecon(config, base, hposd, bias, R=8)
-
-    with tf.Session(graph=g) as sess:
-        sess.run(tf.global_variables_initializer())
-        tfdisplaced = g.get_tensor_by_name('displaced:0')
-        tfrandom = g.get_tensor_by_name('random:0')
-
-        displaced, random = sess.run([tfdisplaced, tfrandom])
-
-    print(displaced)
-    print(random)
+#

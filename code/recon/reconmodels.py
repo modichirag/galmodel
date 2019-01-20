@@ -36,7 +36,9 @@ def graphhposft1pad2(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=
             xx = tf.concat((final[-pad:, :, :], final, final[:pad, :, :]), axis=0)
             xx = tf.concat((xx[:, -pad:, :], xx, xx[:, :pad, :]), axis=1)
             xx = tf.concat((xx[:, :, -pad:], xx, xx[:, :, :pad]), axis=2)
-        xx = tf.expand_dims(tf.expand_dims(xx, 0), -1)
+            xx = tf.expand_dims(tf.expand_dims(xx, 0), -1)
+        else:
+            xx = tf.expand_dims(tf.expand_dims(final, 0), -1)
         #Halos
         yy = tf.expand_dims(tf.expand_dims(data, 0), -1)
         print('xx, yy shape :', xx.shape, yy.shape)

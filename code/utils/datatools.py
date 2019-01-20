@@ -145,7 +145,7 @@ def uncubify(arr, oldshape):
 
 
 
-def gethalomesh(bs, nc, seed, step=5, ncf=512, stepf=40, masswt=False, numd=1e-3, gridding='nn', path=None):
+def gethalomesh(bs, nc, seed, step=5, ncf=512, stepf=40, masswt=False, numd=1e-3, gridding='nn', path=None, getdata=False):
 
     if path is None: path = package_path + '/../../data/z00/'
     ftype = 'L%04d_N%04d_S%04d_%02dstep/'
@@ -160,7 +160,9 @@ def gethalomesh(bs, nc, seed, step=5, ncf=512, stepf=40, masswt=False, numd=1e-3
 
     if gridding == 'nn': hmesh = tools.paintnn(hposd, bs, nc, mass=mass)
     else: hmesh = tools.paintcic(hposd, bs, nc, weights=mass)
-    return hmesh
+
+    if getdata: return hmesh, hposd, massd
+    else: return hmesh
             
     
 
