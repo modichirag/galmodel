@@ -5,6 +5,7 @@ import sys, os
 sys.path.append('../utils/')
 import tools
 import datatools as dtools
+import traintools as ttools
 from time import time
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
  #
@@ -29,48 +30,88 @@ seed(seed_in)
 from tensorflow import set_random_seed
 set_random_seed(seed_in)
 
-bs = 400
-nc, ncf = 128, 512
-step, stepf = 5, 40
-path = '../../data/z00/'
-ftype = 'L%04d_N%04d_S%04d_%02dstep/'
-ftypefpm = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
-numd = 1e-3
-num = int(numd*bs**3)
-R1 = 3
-R2 = 3*1.2
-kny = np.pi*nc/bs
-kk = tools.fftk((nc, nc, nc), bs)
-seeds = [100, 200, 300, 400]
-vseeds = [100, 300, 800, 900]
-rprob = 0.5
+defdict = {}
+defdict['bs'] = 400
+defdict['nc'], defdict['ncf'] = 128, 512
+defdict['step'], defdict['stepf'] = 5, 40
+defdict['path'] = '../../data/z00/'
+defdict['ftype'] = 'L%04d_N%04d_S%04d_%02dstep/'
+defdict['ftypefpm'] = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
+defdict['numd'] = 1e-3
+defdict['R1'] = 3
+defdict['R2'] = 3*1.2
+defdict['seeds'] = [100, 200, 300, 400]
+defdict['vseeds'] = [100, 300, 800, 900]
+defdict['rprob'] = 0.5
 
+for i in defdict.keys():
+    locals()[i] = defdict[i]
+
+pdict = {}
+for i in defdict.keys(): pdict[i] = defdict[i]
+pdict['num'] = int(numd*bs**3)
+pdict['kny'] = np.pi*nc/bs
+pdict['kk'] = tools.fftk((nc, nc, nc), bs)
+#bs = 400
+#nc, ncf = 128, 512
+#step, stepf = 5, 40
+#path = '../../data/z00/'
+#ftype = 'L%04d_N%04d_S%04d_%02dstep/'
+#ftypefpm = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
+#numd = 1e-3
+#num = int(numd*bs**3)
+#R1 = 3
+#R2 = 3*1.2
+#kny = np.pi*nc/bs
+#kk = tools.fftk((nc, nc, nc), bs)
+#seeds = [100, 200, 300, 400]
+#vseeds = [100, 300, 800, 900]
+#rprob = 0.5
+#for i in sdict.keys():
+#    locals()[i] = sdict[i]
+#
 #############################
 
 suff = 'pad2-logistic128-fpm-test'
-fname = open('../models/n10/README', 'a+', 1)
-fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
-fname.close()
+#fname = open('../models/n10/README', 'a+', 1)
+#fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
+#fname.close()
 
 savepath = '../models/n10/%s/'%suff
+#if not os.path.exists(savepath):
+#    os.makedirs(savepath)
 try : os.makedirs(savepath)
 except: pass
+#fname = open(savepath + 'log', 'w+', 1)
 
+pdict['num_cubes']= 500
+pdict['cube_sizes'] = np.array([8, 16, 32, 64, 128]).astype(int)
+pdict['pad'] = int(2)
+pdict['ftname'] = ['cic']
+pdict['tgname'] = ['pnn']
+#
+pdict['nsizes'] = len(pdict['cube_sizes'])
+pdict['cube_sizesft'] = (pdict['cube_sizes'] + 2*pdict['pad']).astype(int)
+pdict['max_offset'] = nc - pdict['cube_sizes']
+pdict['nchannels'] = len(pdict['ftname'])
+pdict['ntargets'] = len(pdict['tgname'])
+
+for i in pdict.keys(): locals()[i] = pdict[i]
 
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
-num_cubes= 500
-cube_sizes = np.array([8, 16, 32, 64, 128]).astype(int)
-cube_sizes = np.array([32]).astype(int)
-nsizes = len(cube_sizes)
-pad = int(2)
-cube_sizesft = (cube_sizes + 2*pad).astype(int)
-max_offset = nc - cube_sizes
-ftname = ['cic']
-tgname = ['pnn']
-nchannels = len(ftname)
-ntargets = len(tgname)
-print('Features are ', ftname, file=fname)
+#num_cubes= 500
+#cube_sizes = np.array([8, 16, 32, 64, 128]).astype(int)
+##cube_sizes = np.array([32]).astype(int)
+#nsizes = len(cube_sizes)
+#pad = int(2)
+#cube_sizesft = (cube_sizes + 2*pad).astype(int)
+#max_offset = nc - cube_sizes
+#ftname = ['cic']
+#tgname = ['pnn']
+#nchannels = len(ftname)
+#ntargets = len(tgname)
+#print('Features are ', ftname, file=fname)
 
 print('Pad with ', pad, file=fname)
 print('Rotation probability = %0.2f'%rprob, file=fname)
@@ -78,77 +119,78 @@ fname.close()
 
 #############################
 ##Read data and generate meshes
+#mesh = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/d/')
 
 
+#
+#def get_meshes(seed):
+#    mesh = {}
+#    mesh['s'] = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'mesh/s/')
+#    partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
+#    mesh['cic'] = tools.paintcic(partp, bs, nc)
+#    #mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
+#    mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
+#    mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
+#    mesh['GD'] = mesh['R1'] - mesh['R2']
+#
+#    hmesh = {}
+#    hpath = path + ftype%(bs, ncf, seed, stepf) + 'FOF/'
+#    hposd = tools.readbigfile(hpath + 'PeakPosition/')
+#    massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
+#    #galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
+#    hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
+#    massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
+#    hposd = hposall[:num].copy()
+#    massd = massall[:num].copy()
+#    #hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
+#    hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
+#    hmesh['mnn'] = tools.paintnn(hposd, bs, nc, massd)
+#    #hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, nc)
+#    #hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, nc)
+#
+#    return mesh, hmesh
+#
+#
+#def generate_training_data():
+#    meshes = {}
+#    cube_features, cube_target = [[] for i in range(len(cube_sizes))], [[] for i in range(len(cube_sizes))]
+#
+#    for seed in seeds:
+#
+#        mesh, hmesh = get_meshes(seed)
+#        meshes[seed] = [mesh, hmesh]
+#
+#        print('All the mesh have been generated for seed = %d'%seed)
+#
+#        #Create training voxels
+#        ftlist = [mesh[i].copy() for i in ftname]
+#        ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
+#        targetmesh = [hmesh[i].copy() for i in tgname]
+#
+#        for i, size in enumerate(cube_sizes):
+#            print('For size = ', size)
+#            if size==nc:
+#                features = [np.stack(ftlistpad, axis=-1)]
+#                target = [np.stack(targetmesh, axis=-1)]
+#            else:
+#                numcubes = int(num_cubes/size*4)
+#                features, target = dtools.randomvoxels(ftlistpad, targetmesh, numcubes, max_offset[i], 
+#                                                size, cube_sizesft[i], seed=seed, rprob=0)
+#            cube_features[i] = cube_features[i] + features
+#            cube_target[i] = cube_target[i] + target
+#
+#    # #
+#    for i in range(cube_sizes.size):
+#        cube_target[i] = np.stack(cube_target[i],axis=0)
+#        cube_features[i] = np.stack(cube_features[i],axis=0)
+#        print(cube_features[i].shape, cube_target[i].shape)
+#
+#    return meshes, cube_features, cube_target
+#
 
-def get_meshes(seed, galaxies=False):
-    mesh = {}
-    mesh['s'] = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'mesh/s/')
-    partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
-    mesh['cic'] = tools.paintcic(partp, bs, nc)
-    mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
-    mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
-    mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
-    mesh['GD'] = mesh['R1'] - mesh['R2']
-
-    hmesh = {}
-    #hpath = path + ftype%(bs, ncf, seed, stepf) + 'FOF/'
-    #hposd = tools.readbigfile(hpath + 'PeakPosition/')
-    #massd = tools.readbigfile(hpath + 'Mass/').reshape(-1)*1e10
-    #galtype = tools.readbigfile(hpath + 'gal_type/').reshape(-1).astype(bool)
-    hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
-    massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
-    hposd = hposall[:num].copy()
-    massd = massall[:num].copy()
-    hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
-    hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
-    hmesh['mnn'] = tools.paintnn(hposd, bs, nc, massd)
-    #hmesh['pnnsat'] = tools.paintnn(hposd[galtype], bs, nc)
-    #hmesh['pnncen'] = tools.paintnn(hposd[~galtype], bs, nc)
-
-    return mesh, hmesh
-
-
-def generate_training_data():
-    meshes = {}
-    cube_features, cube_target = [[] for i in range(len(cube_sizes))], [[] for i in range(len(cube_sizes))]
-
-    for seed in seeds:
-
-        mesh, hmesh = get_meshes(seed)
-        meshes[seed] = [mesh, hmesh]
-
-        print('All the mesh have been generated for seed = %d'%seed)
-
-        #Create training voxels
-        ftlist = [mesh[i].copy() for i in ftname]
-        ftlistpad = [np.pad(i, pad, 'wrap') for i in ftlist]
-        targetmesh = [hmesh[i].copy() for i in tgname]
-
-        for i, size in enumerate(cube_sizes):
-            print('For size = ', size)
-            if size==nc:
-                features = [np.stack(ftlistpad, axis=-1)]
-                target = [np.stack(targetmesh, axis=-1)]
-            else:
-                numcubes = int(num_cubes/size*4)
-                features, target = dtools.randomvoxels(ftlistpad, targetmesh, numcubes, max_offset[i], 
-                                                size, cube_sizesft[i], seed=seed, rprob=0)
-            cube_features[i] = cube_features[i] + features
-            cube_target[i] = cube_target[i] + target
-
-     
-    for i in range(cube_sizes.size):
-        cube_target[i] = np.stack(cube_target[i],axis=0)
-        cube_features[i] = np.stack(cube_features[i],axis=0)
-        print(cube_features[i].shape, cube_target[i].shape)
-
-    return meshes, cube_features, cube_target
-
-
-meshes, cube_features, cube_target = generate_training_data()
+meshes, cube_features, cube_target = ttools.generate_training_data(pdict)
 vmeshes = {}
-for seed in vseeds: vmeshes[seed] = get_meshes(seed)
+for seed in vseeds: vmeshes[seed] = get_meshes(seed, pdict)
 
 
 #############################
