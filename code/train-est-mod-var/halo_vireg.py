@@ -41,8 +41,8 @@ vseeds = [100, 300, 800, 900]
 
 #############################
 
-fudge = 0.5
-suff = 'pad0-vireg-test'
+fudge = 1.0
+suff = 'pad0-vireg-reg1p0'
 fname = open('../models/n10/README', 'a+', 1)
 fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
 fname.close()
