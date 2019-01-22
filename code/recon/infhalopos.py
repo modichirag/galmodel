@@ -1,7 +1,7 @@
 import numpy as np
 import numpy
 import os, sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 from time import time
 import matplotlib.pyplot as plt
 
@@ -52,16 +52,12 @@ def loss_callback(var, literals, nprint=50, nsave=50, maxiter=500, t0=time()):
 
 ########################
 
-anneal = False
+anneal = True
 pad = 0
-#modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-logistic128/module/1547856591/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg0p1/module/1547930039/likelihood/'
-#modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg0p5/module/1547949556/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg1p0/module/1547981391/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg1000p0/module/1548052203/likelihood/'
-resnorm = 0
+modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg1000p0/module/1548109390/inference/'
+resnorm = 3
 #suffix = 'nc%dnorm-fpm/'%(resnorm)
-suffix = 'nc%dnorm-vireg1000p0_stdinit/'%(resnorm)
+suffix = 'nc%dnorm-vireg1000p0_inf_stdinit/'%(resnorm)
 
 
 
@@ -77,10 +73,10 @@ if __name__=="__main__":
     dpath = './../../data/z00/'
     ftype = 'L%04d_N%04d_S%04d_%02dstep/'
     #
-    maxiter = 500
+    maxiter = 502
     gtol = 1e-8
     sigma = 1**0.5
-    nprint, nsave = 20, 40
+    nprint, nsave = 10, 40
     R0s = [4, 2, 1, 0]
     
     #output folder
@@ -118,7 +114,7 @@ if __name__=="__main__":
     #Do reconstruction here
     print('\nDo reconstruction\n')
 
-    recong = rmods.graphhposft1(config, modpath, data, pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm)    
+    recong = rmods.graphhposft1(config, modpath, data, pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm, inference=True)    
     #
     
     initval = None

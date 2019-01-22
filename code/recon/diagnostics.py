@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy
 import os, sys
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import tensorflow as tf
 import tensorflow_hub as hub
 
@@ -192,7 +192,7 @@ def makefig(truemesh, reconmesh, fname, boxsize, title=''):
     labels = ['Linear', 'Final', 'Data']
     for i in range(3):
         m1, m2 = meshes[i][0], meshes[i][1]
-        if m1.mean() < 1e-6:
+        if m1.mean() < 1e-2:
             m1, m2 = m1+1, m2+1
         k, pt = tools.power(m1, boxsize=boxsize)
         k, pr = tools.power(m2, boxsize=boxsize)
@@ -315,6 +315,7 @@ def savehalofig2(truemesh, reconmesh, fname, hgraph):
 #######################################################
 if __name__=="__main__":
     
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     bs, nc = 400, 128
     seed = 100
     step = 5

@@ -1,6 +1,6 @@
 import numpy as np
 import sys, os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 sys.path.append('../flowpm/')
 sys.path.append('../utils/')
 
@@ -75,6 +75,7 @@ def standardinit(config, base, pos, final, R=8):
 
 if __name__=="__main__":
 
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     bs, nc, step = 400, 128, 5
     ncf, stepf = 512, 40
     seed = 100
