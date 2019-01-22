@@ -56,7 +56,6 @@ fname = open(savepath + 'log', 'w+', 1)
 #fname = None
 num_cubes= 500
 cube_sizes = np.array([8, 16, 32, 64, 128]).astype(int)
-cube_sizes = np.array([32]).astype(int)
 nsizes = len(cube_sizes)
 pad = int(2)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
@@ -254,7 +253,7 @@ def check_module(modpath):
             yym = np.stack([vmeshes[seed][1][i] for i in tgname], axis=-1)
             print('xxm, yym shape = ', xxm.shape, yym.shape)
             preds[seed] = sess.run(samples, feed_dict={xx:np.expand_dims(xxm, 0), yy:np.expand_dims(yym, 0)})
-            vmeshes[seed][0]['predict'] = preds[seed][:, :, :]
+            vmeshes[seed][0]['predict'] = np.squeeze(preds[seed])
 
 
     ##############################
@@ -333,4 +332,12 @@ for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)
-    save_module(model, savepath, max_steps)
+    f = open(savepath + 'model/checkpoint')
+    lastpoint = int(f.readline().split('-')[-1][:-2])
+    f.close()
+    if lastpoint > max_steps:
+        print('Don"t save')
+        print(lastpoint)
+    else:
+        print("Have to save")
+        save_module(model, savepath, max_steps)

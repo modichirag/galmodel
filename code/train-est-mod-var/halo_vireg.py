@@ -6,7 +6,7 @@ sys.path.append('../utils/')
 import tools
 import datatools as dtools
 from time import time
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
  #
 import tensorflow as tf
 from tensorflow.contrib.slim import add_arg_scope
@@ -41,8 +41,8 @@ vseeds = [100, 300, 800, 900]
 
 #############################
 
-fudge = 1.0
-suff = 'pad0-vireg-reg1p0'
+fudge = 1000.0
+suff = 'pad0-vireg-reg1000p0'
 fname = open('../models/n10/README', 'a+', 1)
 fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
 fname.close()
@@ -57,7 +57,6 @@ fname = open(savepath + 'log', 'w+', 1)
 #fname = None
 num_cubes= 500
 cube_sizes = np.array([16, 32, 64]).astype(int)
-#cube_sizes = np.array([32]).astype(int)
 nsizes = len(cube_sizes)
 pad = int(0)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
@@ -340,4 +339,12 @@ for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)
-    save_module(model, savepath, max_steps)
+    f = open(savepath + 'model/checkpoint')
+    lastpoint = int(f.readline().split('-')[-1][:-2])
+    f.close()
+    if lastpoint > max_steps:
+        print('Don"t save')
+        print(lastpoint)
+    else:
+        print("Have to save")
+        save_module(model, savepath, max_steps)
