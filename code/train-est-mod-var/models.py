@@ -487,16 +487,16 @@ def _mdn_mass_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opt
         #net = tf.reshape(net, [-1, cube_size, cube_size, cube_size, n_mixture*6])
 
 
-        mu, unconstrained_sigma, probs, loc, unconstrained_scale, logits = tf.split(net,
+        mu, unconstrained_sigma, logitsm, loc, unconstrained_scale, logits = tf.split(net,
                                                     num_or_size_splits=6,
                                                     axis=-1)
         scale = tf.nn.softplus(unconstrained_scale)
-        sigma = tf.nn.relu(unconstrained_sigma) + 1e-2
+        sigma = tf.nn.solftplus(unconstrained_sigma) + 1e-2
         mu = tf.expand_dims(mu, -1)
         sigma = tf.expand_dims(sigma, -1)
         print('\nmu\n', mu)
         print('\nsigma\n', sigma)
-        print('\nprobs\n', probs)
+        print('\nlogitsm\n', logitsm)
         print('\nloc\n', loc)
         print('\nscale\n', scale)
         print('\nlogits\n', logits)
@@ -519,9 +519,9 @@ def _mdn_mass_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opt
         print('\mix_pos\n', mixture_dist)
         
         gmm = tfd.MixtureSameFamily(
-            mixture_distribution=tfd.Categorical(probs=probs),
-            components_distribution=tfd.MultivariateNormalDiag(loc=mu, scale_diag=sigma))
-            #components_distribution=tfd.Normal(loc=mu, scale=sigma))
+            mixture_distribution=tfd.Categorical(logits=logitsm),
+            #components_distribution=tfd.MultivariateNormalDiag(loc=mu, scale_diag=sigma))
+            components_distribution=tfd.Normal(loc=mu, scale=sigma))
         print('\gmm\n', gmm)
 
 
@@ -604,7 +604,8 @@ def _mdn_mass_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opt
 
 
 def _mdn_inv_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, fudge=1.0):
-
+    '''Train inverse model i.e. go from the halo field to matter overdensity
+    '''
     # Check for training mode
     is_training = mode == tf.estimator.ModeKeys.TRAIN
         
@@ -630,25 +631,25 @@ def _mdn_inv_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opti
         cube_size = tf.shape(obs_layer)[1]
         net = tf.reshape(net, [-1, cube_size, cube_size, cube_size, nchannels, n_mixture*3])
 
-        probs, loc, unconstrained_scale = tf.split(net, num_or_size_splits=3,
+        logits, loc, unconstrained_scale = tf.split(net, num_or_size_splits=3,
                                                     axis=-1)
         print('\nloc :\n', loc)
-        scale = tf.nn.softplus(unconstrained_scale[...,0])
+        scale = tf.nn.softplus(unconstrained_scale[...]) 
         
         distribution = tfd.MixtureSameFamily(
-            mixture_distribution=tfd.Categorical(probs=probs[...,0]),
-            components_distribution=tfd.MultivariateNormalDiag(loc=loc[...,0], scale_diag=scale))
-            #components_distribution=tfd.Normal(loc=mu, scale=sigma))
+            mixture_distribution=tfd.Categorical(logits=logits[...]),
+            #components_distribution=tfd.MultivariateNormalDiag(loc=loc[...,0], scale_diag=scale))
+            components_distribution=tfd.Normal(loc=loc[...], scale=scale))
         print('\gmm\n', distribution)
 
-        #distribution = tfd.MultivariateNormalDiag(loc=loc[...,0], scale_diag=scale)
         
         # Define a function for sampling, and a function for estimating the log likelihood
-        sample = distribution.sample()
+        sample = tf.exp(distribution.sample()) - 1.01
         print('\ninf dist sample :\n', distribution.sample())
-        logfeature = tf.log1p(feature_layer)
+        logfeature = tf.log(tf.add(1.01, feature_layer))
         print('\nlogfeature :\n', logfeature)
         loglik = distribution.log_prob(logfeature[...])
+
         hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
                           outputs={'sample':sample, 'loglikelihood':loglik, 'sigma':scale, 'mean':loc})
     
@@ -656,8 +657,6 @@ def _mdn_inv_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opti
     # Create model and register module if necessary
     spec = hub.create_module_spec(_module_fn)
     module = hub.Module(spec, trainable=True)
-    spec_inf = hub.create_module_spec(_inference_module_fn)
-    module_inf = hub.Module(spec_inf, trainable=True)
     
     if isinstance(features,dict):
         predictions = module(features, as_dict=True)
@@ -676,7 +675,6 @@ def _mdn_inv_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opti
     
     loglik = predictions['loglikelihood']
     print('\nloglik :\n', loglik)
-    print('\nreg_loglik :\n', reg_loglik)
     ####Compute and register loss function
     neg_log_likelihood = -tf.reduce_sum(loglik, axis=-1)
     neg_log_likelihood = tf.reduce_mean(neg_log_likelihood) 
@@ -702,7 +700,6 @@ def _mdn_inv_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opti
             tf.summary.scalar('rate', learning_rate)                            
         tf.summary.scalar('total_loss', total_loss)
         tf.summary.scalar('loss', neg_log_likelihood)
-        tf.summary.scalar('reg_loss', reg_log_likelihood)
     elif mode == tf.estimator.ModeKeys.EVAL:
         
         eval_metric_ops = { "log_p": neg_log_likelihood}

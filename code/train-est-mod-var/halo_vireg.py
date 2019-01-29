@@ -12,7 +12,8 @@ import tensorflow as tf
 from tensorflow.contrib.slim import add_arg_scope
 from layers import wide_resnet
 import tensorflow_hub as hub
-#
+
+
 import models
 import logging
 from datetime import datetime
@@ -32,7 +33,7 @@ ftype = 'L%04d_N%04d_S%04d_%02dstep/'
 ftypefpm = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
 numd = 1e-3
 num = int(numd*bs**3)
-R1 = 3
+R1 = 10
 R2 = 3*1.2
 kny = np.pi*nc/bs
 kk = tools.fftk((nc, nc, nc), bs)
@@ -41,17 +42,16 @@ vseeds = [100, 300, 800, 900]
 
 #############################
 
-fudge = 1000.0
-suff = 'pad0-vireg-reg1000p0'
+suff = 'pad0-vireg-reg1000p0_R10'
+fudge = 1000
 fname = open('../models/n10/README', 'a+', 1)
 fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
 fname.close()
 
 savepath = '../models/n10/%s/'%suff
-#if not os.path.exists(savepath):
-#    os.makedirs(savepath)
 try : os.makedirs(savepath)
 except: pass
+
 
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
@@ -61,46 +61,45 @@ nsizes = len(cube_sizes)
 pad = int(0)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = nc - cube_sizes
-ftname = ['cic']
+ftname = ['cic', 'R1']
 tgname = ['pnn']
 nchannels = len(ftname)
 ntargets = len(tgname)
 
-
 batch_size=32
 rprob = 0.5
-
 
 print('Features are ', ftname, file=fname)
 print('Pad with ', pad, file=fname)
 print('Rotation probability = %0.2f'%rprob, file=fname)
+fname.close()
 
 #############################
 ##Read data and generate meshes
-#mesh = tools.readbigfile(path + ftype%(bs, nc, seed, step) + 'mesh/d/')
 
 
 
-def get_meshes(seed):
+def get_meshes(seed, galaxies=False):
     mesh = {}
     mesh['s'] = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'mesh/s/')
     partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
     mesh['cic'] = tools.paintcic(partp, bs, nc)
-    #mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
-    #mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
-    #mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
-    #mesh['GD'] = mesh['R1'] - mesh['R2']
+    mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
+    mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
+    mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
+    mesh['GD'] = mesh['R1'] - mesh['R2']
 
     hmesh = {}
     hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
     massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
     hposd = hposall[:num].copy()
     massd = massall[:num].copy()
-    #hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
+    hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
     hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
     hmesh['mnn'] = tools.paintnn(hposd, bs, nc, massd)
 
     return mesh, hmesh
+
 
 
 def generate_training_data():
@@ -131,14 +130,13 @@ def generate_training_data():
             cube_features[i] = cube_features[i] + features
             cube_target[i] = cube_target[i] + target
 
-    # #
+     
     for i in range(cube_sizes.size):
         cube_target[i] = np.stack(cube_target[i],axis=0)
         cube_features[i] = np.stack(cube_features[i],axis=0)
         print(cube_features[i].shape, cube_target[i].shape)
 
     return meshes, cube_features, cube_target
-
 
 
 
@@ -149,7 +147,7 @@ class MDNEstimator(tf.estimator.Estimator):
     """
 
     def __init__(self,
-                 nchannels, 
+                 nchannels,
                  n_y,
                  n_mixture,
                  optimizer=tf.train.AdamOptimizer,
@@ -160,9 +158,16 @@ class MDNEstimator(tf.estimator.Estimator):
         """
 
         def _model_fn(features, labels, mode):
+            return models._mdn_model_fn(features, labels, 
+                                 nchannels, n_y, n_mixture, dropout,
+                                 optimizer, mode)
+
+
+        def _model_fn(features, labels, mode):
             return models._mdn_vireg_model_fn(features, labels, 
-                                        nchannels, n_y, n_mixture, dropout,
+                                 nchannels, n_y, n_mixture, dropout,
                                         optimizer, mode, fudge=fudge)
+
 
         super(self.__class__, self).__init__(model_fn=_model_fn,
                                              model_dir=model_dir,
@@ -170,9 +175,6 @@ class MDNEstimator(tf.estimator.Estimator):
 
 
 
-        
-#############################################################################
-###Train
 
 
 def mapping_function(inds):
@@ -236,7 +238,7 @@ def save_module(model, savepath, max_steps):
     modpath = exporter.export(model, savepath + 'module', model.latest_checkpoint())
     modpath = modpath.decode("utf-8") 
     check_module(modpath)
-
+    
 
 #####
 def check_module(modpath):
@@ -260,8 +262,8 @@ def check_module(modpath):
             yym = np.stack([vmeshes[seed][1][i] for i in tgname], axis=-1)
             print('xxm, yym shape = ', xxm.shape, yym.shape)
             preds[seed] = sess.run(samples, feed_dict={xx:np.expand_dims(xxm, 0), yy:np.expand_dims(yym, 0)})
-            vmeshes[seed][0]['predict'] = np.squeeze(preds[seed][:, :, :])
-            print(preds[seed].shape)
+            vmeshes[seed][0]['predict'] = np.squeeze(preds[seed])
+
 
     ##############################
     ##Power spectrum
@@ -307,10 +309,10 @@ def check_module(modpath):
 
 ############################################################################
 #############---------MAIN---------################
+
 meshes, cube_features, cube_target = generate_training_data()
 vmeshes = {}
 for seed in vseeds: vmeshes[seed] = get_meshes(seed)
-
 
 # get TF logger
 log = logging.getLogger('tensorflow')
@@ -329,13 +331,13 @@ fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000]:
-#for max_steps in [100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
+#for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000]:
+for max_steps in [50, 100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
 
-    model =  MDNEstimator(nchannels=nchannels, n_y=ntargets, n_mixture=8, dropout=0.9,
+    model =  MDNEstimator(nchannels=nchannels, n_y=ntargets, n_mixture=8, dropout=0.95,
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)

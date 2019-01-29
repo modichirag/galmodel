@@ -15,6 +15,7 @@ import tensorflow_hub as hub
 
 
 import models
+import revnets
 import logging
 from datetime import datetime
 
@@ -33,21 +34,21 @@ ftype = 'L%04d_N%04d_S%04d_%02dstep/'
 ftypefpm = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
 numd = 1e-3
 num = int(numd*bs**3)
-R1 = 10
+R1 = 3
 R2 = 3*1.2
 kny = np.pi*nc/bs
 kk = tools.fftk((nc, nc, nc), bs)
-#seeds = [100]
 seeds = [100, 200, 300, 400]
 vseeds = [100, 300, 800, 900]
 
 #############################
 
-suff = 'pad0-inv2'
-fudge = 1000
-fname = open('../models/n10/README', 'a+', 1)
-fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
-fname.close()
+loss = 'l2'
+testwith = 'lambda'
+softplus = False
+suff = 'rev_nn_l2'
+
+
 
 savepath = '../models/n10/%s/'%suff
 try : os.makedirs(savepath)
@@ -57,17 +58,17 @@ except: pass
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
 num_cubes= 500
-cube_sizes = np.array([16, 32, 64]).astype(int)
+cube_sizes = np.array([16, 32, 64, 128]).astype(int)
 nsizes = len(cube_sizes)
 pad = int(0)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = nc - cube_sizes
-ftname = ['cicovd']
-tgname = ['pcic']
+ftname = ['cic']
+tgname = ['pnn']
 nchannels = len(ftname)
 ntargets = len(tgname)
 
-batch_size=32
+batch_size=64
 rprob = 0.5
 
 print('Features are ', ftname, file=fname)
@@ -85,7 +86,6 @@ def get_meshes(seed, galaxies=False):
     mesh['s'] = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'mesh/s/')
     partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
     mesh['cic'] = tools.paintcic(partp, bs, nc)
-    mesh['cicovd'] = mesh['cic']/mesh['cic'].mean()-1
     mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
     mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
     mesh['R2'] = tools.fingauss(mesh['cic'], kk, R2, kny)
@@ -143,35 +143,6 @@ def generate_training_data():
 
 
 #############################
-
-class MDNEstimator(tf.estimator.Estimator):
-    """An estimator for distribution estimation using Mixture Density Networks.
-    """
-
-    def __init__(self,
-                 nchannels,
-                 n_y,
-                 n_mixture,
-                 optimizer=tf.train.AdamOptimizer,
-                 dropout=None,
-                 model_dir=None,
-                 config=None):
-        """Initializes a `MDNEstimator` instance.
-        """
-
-
-        def _model_fn(features, labels, mode):
-            return models._mdn_inv_model_fn(features, labels, 
-                                 nchannels, n_y, n_mixture, dropout,
-                                        optimizer, mode, fudge=fudge)
-
-
-        super(self.__class__, self).__init__(model_fn=_model_fn,
-                                             model_dir=model_dir,
-                                             config=config)
-
-
-
 
 
 def mapping_function(inds):
@@ -246,8 +217,8 @@ def check_module(modpath):
     module = hub.Module(modpath + '/likelihood/')
     xx = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
     yy = tf.placeholder(tf.float32, shape=[None, None, None, None, ntargets], name='labels')
-    samples = module(dict(features=xx, labels=yy), as_dict=True)['sample']
-    loglik = module(dict(features=xx, labels=yy), as_dict=True)['loglikelihood']
+    samples = module(dict(features=xx, labels=yy), as_dict=True)[testwith]
+    loglik = module(dict(features=xx, labels=yy), as_dict=True)[loss]
 
     preds = {}
     with tf.Session() as sess:
@@ -272,9 +243,7 @@ def check_module(modpath):
     ax = axar[0]
     for seed in vseeds:
         for i, key in enumerate(['']):
-            predict, hpmeshd = vmeshes[seed][0]['predict%s'%key] , vmeshes[seed][0][ftname[0]], 
-            if predict.mean() <1e-3 : predict += 1
-            if hpmeshd.mean() <1e-3 : hpmeshd += 1
+            predict, hpmeshd = vmeshes[seed][0]['predict%s'%key] , vmeshes[seed][1][tgname[0]], 
             k, pkpred = tools.power(predict/predict.mean(), boxsize=bs, k=kmesh)
             k, pkhd = tools.power(hpmeshd/hpmeshd.mean(), boxsize=bs, k=kmesh)
             k, pkhx = tools.power(hpmeshd/hpmeshd.mean(), predict/predict.mean(), boxsize=bs, k=kmesh)    
@@ -293,14 +262,10 @@ def check_module(modpath):
     #
     ax = axar[1]
     for i, key in enumerate([ '']):
-        predict, hpmeshd = vmeshes[seed][0]['predict%s'%key] , vmeshes[seed][0][ftname[0]], 
+        predict, hpmeshd = vmeshes[seed][0]['predict%s'%key] , vmeshes[seed][1][tgname[0]], 
         vmin, vmax = 0, (hpmeshd[:, :, :].sum(axis=0)).max()
-        #im = ax[0].imshow(predict[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
-        #im = ax[1].imshow(hpmeshd[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
-        im = ax[0].imshow(predict[:, :, :].sum(axis=0))
-        plt.colorbar(im, ax=ax[0])
-        im = ax[1].imshow(hpmeshd[:, :, :].sum(axis=0))
-        plt.colorbar(im, ax=ax[1])
+        im = ax[0].imshow(predict[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
+        im = ax[1].imshow(hpmeshd[:, :, :].sum(axis=0), vmin=vmin, vmax=vmax)
         ax[0].set_title(key, fontsize=15)
     ax[0].set_title('Prediction', fontsize=15)
     ax[1].set_title('Truth', fontsize=15)
@@ -313,8 +278,32 @@ def check_module(modpath):
 ############################################################################
 #############---------MAIN---------################
 
+class MDNEstimator(tf.estimator.Estimator):
+    """An estimator for distribution estimation using Mixture Density Networks.
+    """
+
+    def __init__(self,
+                 n_y,
+                 nchannels,
+#                  cube_size,
+                 optimizer=tf.train.AdamOptimizer,
+                 dropout=None,
+                 model_dir=None,
+                 config=None):
+        """Initializes a `MDNEstimator` instance.
+        """
+
+        def _model_fn(features, labels, mode):
+            return revnets._mdn_model_fn(features, labels, 
+                 n_y, nchannels, #cube_size, 
+                                 dropout, optimizer, mode, loss=loss, softplus=softplus)
+
+        super(self.__class__, self).__init__(model_fn=_model_fn,
+                                             model_dir=model_dir,
+                                             config=config)
+
+
 meshes, cube_features, cube_target = generate_training_data()
-for i in cube_features: print(i.min())
 vmeshes = {}
 for seed in vseeds: vmeshes[seed] = get_meshes(seed)
 
@@ -335,13 +324,13 @@ fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-#for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000]:
-for max_steps in [50, 100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
+for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000]:
+#for max_steps in [100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
 
-    model =  MDNEstimator(nchannels=nchannels, n_y=ntargets, n_mixture=8, dropout=0.95,
+    model =  MDNEstimator(n_y=ntargets, nchannels=nchannels, dropout=0.95,
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)

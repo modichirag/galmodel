@@ -6,7 +6,7 @@ sys.path.append('../utils/')
 import tools
 import datatools as dtools
 from time import time
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
  #
 import tensorflow as tf
 from tensorflow.contrib.slim import add_arg_scope
