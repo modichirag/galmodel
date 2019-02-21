@@ -27,6 +27,7 @@ def graphpm(config, verbose=True, initlin=False):
     '''return graph to do pm simulation
     if initlin is False, the returned graph generates initial conditions
     if initlin is True, the returned graph has a placeholder'''
+    bs, nc = config['boxsize'], config['nc']
     g = tf.Graph()
     with g.as_default():
 
@@ -45,7 +46,7 @@ def graphpm(config, verbose=True, initlin=False):
 
 
 
-def genpm(config, linmesh=None, ofolder=None):
+def genpm(config, linmesh=None, ofolder=None, verbose=True):
     '''do pm sim to generate final matter field'''
     ##Generate Data
     bs, nc = config['boxsize'], config['nc']
@@ -53,7 +54,7 @@ def genpm(config, linmesh=None, ofolder=None):
         g = graphpm(config, initlin=False)
         linmesh = np.zeros((nc, nc, nc))
     else:
-        g = graphpm(config, initlin=True)
+        g = graphpm(config, initlin=True, verbose=verbose)
 
     with tf.Session(graph=g) as session:
         session.run(tf.global_variables_initializer())

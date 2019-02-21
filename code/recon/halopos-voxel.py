@@ -1,7 +1,7 @@
 import numpy as np
 import numpy
 import os, sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 from time import time
 import matplotlib.pyplot as plt
 
@@ -54,10 +54,13 @@ pad = 0
 modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg0p1/module/1547930039/likelihood/'
 #modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg0p5/module/1547949556/likelihood/'
 modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg1p0/module/1547981391/likelihood/'
+modpath = '/home/chmodi/Projects/galmodel/code/models/n10/rev_nn_l2/module/1548456835/likelihood/'
+loss = 'l2'
+sample = 'lambda'
 
 resnorm = 0
 #suffix = 'nc%dnorm-fpm/'%(resnorm)
-suffix = 'nc%dnorm-vireg1p0_stdinit/'%(resnorm)
+suffix = 'nc%dnorm-rev_nn_l2/'%(resnorm)
 
 
 ########################
@@ -73,7 +76,7 @@ if __name__=="__main__":
     dpath = './../../data/z00/'
     ftype = 'L%04d_N%04d_S%04d_%02dstep/'
     #
-    maxiter = 502
+    maxiter = 102
     gtol = 1e-8
     sigma = 1**0.5
     nprint, nsave = 50, 100
@@ -142,7 +145,9 @@ if __name__=="__main__":
 
         truemeshii = [truthsplit[ii], finalsplit[ii], datasplit[ii]]
         print('\nFor voxel %d of %d\n'%(ii, ncube**3))
-        recong = rmods.graphhposft1(config2, modpath, datasplit[ii], pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm)    
+        recong = rmods.graphhposft1(config2, modpath, datasplit[ii], pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm,
+                                    inference=False,loss=loss, sample=sample)    
+        #recong = rmods.graphhposft1(config2, modpath, datasplit[ii], pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm)    
         losses = []
         literals = {'losses':losses, 'truemeshes':truemeshii, 'bs':bs, 'nc':nc}
         tstart = time()

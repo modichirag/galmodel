@@ -1,3 +1,6 @@
+###Get the parameters for the likelihood from the inverse network, code it (for some reason)
+#so that the network is no longer a part of the reconstruction and reconstruct from that likelihood
+
 import numpy as np
 import numpy
 import os, sys
@@ -47,6 +50,25 @@ def loss_callback(var, literals, nprint=50, nsave=50, maxiter=500, t0=time()):
 
 
 
+def generate_likelihood(data, modulepath):
+    tf.reset_default_graph()
+    module = hub.Module(modulepath)
+    xx = tf.placeholder(tf.float32, shape=[None, None, None, None, 1], name='input')
+    yy = tf.placeholder(tf.float32, shape=[None, None, None, None, 1], name='labels')
+    samples = module(dict(features=xx, labels=yy), as_dict=True)['sample']
+    loc = module(dict(features=xx, labels=yy), as_dict=True)['mean']
+    logits_t = module(dict(features=xx, labels=yy), as_dict=True)['logits']
+    scale = module(dict(features=xx, labels=yy), as_dict=True)['sigma']
+
+    with tf.Session() as sess:
+        sess.run(tf.initializers.global_variables())
+        dataexp  = data.copy()
+        dataexp = np.expand_dims(np.expand_dims(data, 0), -1)
+        print(dataexp.shape)
+        preds, mean, sigma, logits = sess.run([samples, loc, scale, logits_t],
+                                                     feed_dict={yy:dataexp})
+        prob = sess.run(tf.nn.softmax(logits))
+    return [np.squeeze(mean), np.squeeze(sigma), np.squeeze(prob)]
 
 
 
@@ -54,10 +76,11 @@ def loss_callback(var, literals, nprint=50, nsave=50, maxiter=500, t0=time()):
 
 anneal = True
 pad = 0
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg1000p0/module/1548109390/inference/'
+inference = True
+modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-inv3/module/1549940205/likelihood/'
 resnorm = 3
 #suffix = 'nc%dnorm-fpm/'%(resnorm)
-suffix = 'nc%dnorm-vireg1000p0_inf_stdinit/'%(resnorm)
+suffix = 'nc%dnorm-inv_like/'%(resnorm)
 
 
 
@@ -73,10 +96,10 @@ if __name__=="__main__":
     dpath = './../../data/z00/'
     ftype = 'L%04d_N%04d_S%04d_%02dstep/'
     #
-    maxiter = 502
+    maxiter = 500
     gtol = 1e-8
     sigma = 1**0.5
-    nprint, nsave = 10, 40
+    nprint, nsave = 20, 40
     R0s = [4, 2, 1, 0]
     
     #output folder
@@ -89,8 +112,6 @@ if __name__=="__main__":
     print('Output in ofolder = \n%s'%ofolder)
     pkfile = '../flowpm/Planck15_a1p00.txt'
     config = Config(bs=bs, nc=nc, seed=seed, pkfile=pkfile)
-    #hgraph = dg.graphlintomod(config, modpath, pad=pad, ny=1)
-    print('Diagnostic graph constructed')
     fname = open(ofolder+'/README', 'w', 1)
     fname.write('Using module from path - %s n'%modpath)
     fname.close()
@@ -104,8 +125,11 @@ if __name__=="__main__":
     hposall = tools.readbigfile(dpath + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
     hposd = hposall[:num].copy()
     data = tools.paintnn(hposd, bs, nc)
+    likelihood = generate_likelihood(data, modpath)
+    
+    #truemeshes = [truth, final, data]
+    truemeshes = [truth, final, final]
 
-    truemeshes = [truth, final, data]
     np.save(ofolder + '/truth.f4', truth)
     np.save(ofolder + '/final.f4', final)
     np.save(ofolder + '/data.f4', data)
@@ -113,13 +137,13 @@ if __name__=="__main__":
     ###
     #Do reconstruction here
     print('\nDo reconstruction\n')
-
-    recong = rmods.graphhposft1(config, modpath, data, pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm, inference=True)    
+    
+    recong = rmods.graphdm_likelihood(config, likelihood, maxiter=100, anneal=anneal, dataovd=False, gtol=gtol)
     #
     
     initval = None
     initval = np.random.normal(1, 0.5, size=nc**3).reshape(nc, nc, nc).astype(config['dtype'])#truth
-    initval = standardinit(config, data, hposd, final, R=8)
+    #initval = standardinit(config, data, hposd, final, R=8)
     #initval = tools.readbigfile(dpath + ftype%(bs, nc, 900, step) + 'mesh/s/')
     #initval = np.ones((nc, nc, nc))
     #initval = truth.copy()
@@ -135,7 +159,7 @@ if __name__=="__main__":
         session.run(tf.global_variables_initializer())
         linmesh = g.get_tensor_by_name("linmesh:0")
         final = g.get_tensor_by_name("final:0")
-        samples = tf.squeeze(g.get_tensor_by_name("samples:0"))
+        samples = tf.squeeze(g.get_tensor_by_name("final:0"))
         optimizer = g.get_collection_ref('opt')[0]
         loss = g.get_tensor_by_name('loss:0')
         chisq = g.get_tensor_by_name('chisq:0')
