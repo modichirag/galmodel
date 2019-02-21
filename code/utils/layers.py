@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from tfops import specnormconv3d, actnorm3d
 
 @slim.add_arg_scope
 def wide_resnet(inputs, depth, resample=None,
@@ -61,3 +62,56 @@ def wide_resnet(inputs, depth, resample=None,
                 return slim.utils.collect_named_outputs(outputs_collections,
                                                         sc.name,
                                                         output)
+
+
+
+
+@slim.add_arg_scope
+def wide_resnet_snorm(inputs, depth, 
+                kernel_size=3, stride=1,
+                keep_prob=None,
+                activation_fn=tf.nn.leaky_relu,
+                is_training=True,
+                outputs_collections=None, scope=None):
+    """
+    Wide residual units as advocated in arXiv:1605.07146
+    Adapted from slim implementation of residual networks
+    Impose Lipschitz control on the kernels by dividing them with
+    their spectral norm. Batch norm is replaced by actnorm
+    """
+    depth_residual = 2 * depth
+
+    depth_in = slim.utils.last_dimension(inputs.get_shape(), min_rank=4)
+    size_in = inputs.get_shape().as_list()[1]
+
+    with tf.variable_scope(scope, 'wide_resnet', [inputs]) as sc:
+        with slim.arg_scope([actnorm3d, slim.dropout],
+                            is_training=is_training):
+            with slim.arg_scope([specnormconv3d],
+                                kernel_size=kernel_size,
+                                stride=stride):
+
+                preact = actnorm3d(inputs, scope='preact')
+                if activation_fn is not None: preact = activation_fn(preact)
+                
+                if depth_in != depth:
+                    shortcut = specnormconv3d(preact, depth, name='shortcut')
+                else:
+                    shortcut = preact
+
+                residual = specnormconv3d(preact, depth_residual, name='res1')
+                #residual = specnormconv3d(preact, depth_residual, scope='res1')
+
+                if keep_prob is not None:
+                    residual = slim.dropout(residual, keep_prob=keep_prob)
+
+                residual = specnormconv3d(residual, depth, name='res2')
+#                 residual = specnormconv3d(residual, depth, stride=1, scope='res2',
+#                                        normalizer_fn=None, activation_fn=None)
+
+                output = shortcut + residual
+
+                return slim.utils.collect_named_outputs(outputs_collections,
+                                                        sc.name,
+                                                        output)
+            
