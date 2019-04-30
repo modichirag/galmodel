@@ -40,15 +40,18 @@ kk = tools.fftk((nc, nc, nc), bs)
 seeds = [100, 200, 300, 400]
 vseeds = [100, 300, 800, 900]
 
+#seeds = [100]
+#vseeds = [100]
 #############################
 
 normwt = 0.7
-nfilter0 = 1
-suff = 'pad0-specres0p7_poisson'
+n_mixture = 1
+pad = int(4)
+suff = 'pad%d-spec_nozero_maskpos_pois'%pad
 #fname = open('../models/n10/README', 'a+', 1)
 #fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
 #fname.close()
-
+#
 savepath = '../models/n10/%s/'%suff
 try : os.makedirs(savepath)
 except: pass
@@ -56,10 +59,9 @@ except: pass
 
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
-num_cubes = 500
+num_cubes= 500
 cube_sizes = np.array([8, 16, 32, 64, 128]).astype(int)
 nsizes = len(cube_sizes)
-pad = int(0)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = nc - cube_sizes
 ftname = ['cic']
@@ -159,9 +161,9 @@ class MDNEstimator(tf.estimator.Estimator):
         """
 
         def _model_fn(features, labels, mode):
-            return models._mdn_specres_poisson_fn(features, labels, 
+            return models._mdn_specres_nozero_mask_poisson_model_fn(features, labels, 
                                  nchannels, n_y, n_mixture, dropout,
-                                                  optimizer, mode, normwt=normwt, nfilter0=nfilter0)
+                                                                    optimizer, mode, pad=pad, normwt=normwt)
 
         super(self.__class__, self).__init__(model_fn=_model_fn,
                                              model_dir=model_dir,
@@ -310,7 +312,7 @@ for seed in vseeds: vmeshes[seed] = get_meshes(seed)
 
 # get TF logger
 log = logging.getLogger('tensorflow')
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 
 # create formatter and add it to the handlers
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -320,18 +322,18 @@ try: os.makedirs(savepath + '/logs/')
 except: pass
 logfile = datetime.now().strftime('logs/tflogfile_%H_%M_%d_%m_%Y.log')
 fh = logging.FileHandler(savepath + logfile)
-fh.setLevel(logging.DEBUG)
+fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
 log.addHandler(fh)
 
 
-for max_steps in [50, 100, 1000, 3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000]:
+for max_steps in [50, 100, 500, 1000, 2000, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 60000, 70000]:
 #for max_steps in [100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
 
-    model =  MDNEstimator(n_y=ntargets, n_mixture=8, dropout=0.95,
+    model =  MDNEstimator(n_y=ntargets, n_mixture=n_mixture, dropout=0.95,
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)
