@@ -16,6 +16,7 @@ class Config(dict):
         self['boxsize'] = dtype(bs)
         self['shift'] = 0.0
         self['nc'] = int(nc)
+        self['kny'] = np.pi*nc/bs
         self['ndim'] = 3
         self['seed'] = seed
         self['pm_nc_factor'] = B

@@ -14,7 +14,7 @@ def r2c3d(rfield, norm=None, dtype=tf.complex64, name=None):
 
 
 def c2r3d(cfield, norm=None, dtype=tf.float32, name=None):
-    if norm is None: norm = tf.cast(tf.reduce_prod(tf.shape(rfield)), dtype)
+    if norm is None: norm = tf.cast(tf.reduce_prod(tf.shape(cfield)), dtype)
     else: norm = tf.cast(norm, dtype)
     rfield = tf.multiply(tf.cast(tf.spectral.ifft3d(cfield), dtype), norm, name=name)
     return rfield

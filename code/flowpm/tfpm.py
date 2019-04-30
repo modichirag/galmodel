@@ -17,6 +17,19 @@ def genwhitenoise(nc, seed, type='complex'):
         return whitec
     
     
+def linfieldwhite(config, white, name='linfield'):
+    '''generate a linear field with a given linear power spectrum'''
+
+    bs, nc = config['boxsize'], config['nc']
+    kmesh = sum(kk**2 for kk in config['kvec'])**0.5
+    pkmesh = config['ipklin'](kmesh)
+    
+    whitec = r2c3d(white, norm=nc**3)
+    lineark = tf.multiply(whitec, (pkmesh/bs**3)**0.5)
+    linear = c2r3d(lineark, norm=nc**3, name=name)
+    return linear
+
+
 def linfield(config, seed=100, name='linfield'):
     '''generate a linear field with a given linear power spectrum'''
 
@@ -100,8 +113,8 @@ def lptz0(lineark, config, a=1, order=2):
     bs, nc = config['boxsize'], config['nc']
     pos = config['grid']
     
-    DX1 = 1 * tflpt1(lineark, pos, config)
-    if order == 2: DX2 = 1 * tflpt1(tflpt2source(lineark, config), pos, config)
+    DX1 = 1 * lpt1(lineark, pos, config)
+    if order == 2: DX2 = 1 * lpt1(lpt2source(lineark, config), pos, config)
     else: DX2 = 0
     return tf.add(DX1 , DX2)
     
