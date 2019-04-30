@@ -129,6 +129,56 @@ def fftk(shape, boxsize, symmetric=True, finite=False, dtype=np.float64):
 
 
 
+
+def laplace(bs=None, nc=None, kvec=None, symmetric=True):
+    if kvec is None:
+        if nc is None or bs is None:
+            print('Need either a k vector or bs & nc')
+            return None
+        else: kvec = fftk((nc, nc, nc), bs, symmetric=symmetric)
+
+    kk = sum(ki**2 for ki in kvec)
+    mask = (kk == 0).nonzero()
+    kk[mask] = 1
+    wts = 1/kk
+    imask = (~(kk==0)).astype(int)
+    wts *= imask
+    return wts
+
+
+
+def gradient(dir, bs, nc, kvec=None, finite=True, symmetric=True):
+    if kvec is None:
+        kvec = fftk((nc, nc, nc), bs, symmetric=symmetric)
+
+    cellsize = bs/nc
+    w = kvec[dir] * cellsize
+    if finite:
+        a = 1 / (6.0 * cellsize) * (8 * numpy.sin(w) - numpy.sin(2 * w))
+        wts = a*1j
+    else: wts = 1j*kvec[dir]
+    return wts
+
+
+def potential(mesh, k, symmetric=True):
+    if abs(mesh.mean()) > 1e-3:
+        ovd = (mesh-mesh.mean())/mesh.mean()
+    else: ovd = mesh.copy()
+    lap = laplace(kvec = k, symmetric=symmetric)
+
+    if not symmetric:
+        ovdc = np.fft.fftn(ovd)/np.prod(mesh.shape)
+        potc = ovdc*lap
+        pot =  np.fft.ifftn(potc)*np.prod(mesh.shape)
+    else:
+        ovdc = np.fft.rfftn(ovd)/np.prod(mesh.shape)
+        potc = ovdc*lap
+        pot =  np.fft.irfftn(potc)*np.prod(mesh.shape)
+    return pot
+    
+
+
+
 def gauss(mesh, k, R):
     kmesh = sum([i ** 2 for i in k])**0.5
     meshc = np.fft.rfftn(mesh)/np.prod(mesh.shape)
@@ -196,17 +246,19 @@ def guassdiff(pm, R1, R2):
 #################################################################################
 
 
-def power(f1, f2=None, boxsize=1.0, k = None):
+def power(f1, f2=None, boxsize=1.0, k = None, symmetric=True):
     """
     Calculate power spectrum given density field in real space & boxsize.
     Divide by mean, so mean should be non-zero
     """
 #    f1 = f1[::2, ::2, ::2]
-    c1 = numpy.fft.rfftn(f1)
+    if symmetric: c1 = numpy.fft.rfftn(f1)
+    else: c1 = numpy.fft.fftn(f1)
     c1 /= c1[0, 0, 0].real
     c1[0, 0, 0] = 0
     if f2 is not None:
-        c2 = numpy.fft.rfftn(f2)
+        if symmetric: c2 = numpy.fft.rfftn(f2)
+        else: c2 = numpy.fft.fftn(f2)
         c2 /= c2[0, 0, 0].real
         c2[0, 0, 0] = 0
     else:
@@ -216,7 +268,7 @@ def power(f1, f2=None, boxsize=1.0, k = None):
     del c1
     del c2
     if k is None:
-        k = fftk(f1.shape, boxsize)
+        k = fftk(f1.shape, boxsize, symmetric=symmetric)
         k = sum(kk**2 for kk in k)**0.5
     H, edges = numpy.histogram(k.flat, weights=x.flat, bins=f1.shape[0]) 
     N, edges = numpy.histogram(k.flat, bins=edges)
