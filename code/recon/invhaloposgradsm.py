@@ -56,37 +56,32 @@ def loss_callback(var, literals, nprint=50, nsave=50, maxiter=500, t0=time()):
 anneal = True
 pad = 0
 stdinit = False
-truthinit = False
+truthinit = True
+datainit = False
 loss = 'loglikelihood'
+inverse = True
 
-#modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-logistic128/module/1547856591/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg0p1/module/1547930039/likelihood/'
-#modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg0p5/module/1547949556/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg1p0/module/1547981391/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-vireg-reg1000p0/module/1548052203/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/notebooks/models/n10/res-SNpois/module/1550712458/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-specres_poisson/module/1550768960/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-specres/module/1550777104/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-maskpos/module/1552011906/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad2-maskpos_1mix/module/1552064473/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/notebooks/models/galmodel/nozero/module/1552096470/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad4-nozero_maskpos_1mix/module/1552155678/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad4-nozero_maskpos_odmask/module/1554325557/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad4-nozero-supp0/module/1555359965/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-specres0p7/module/1555973062/likelihood/'
-#modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad4-spec_nozero_maskpos_pois/module/1556592585/likelihood/'
-
+datacic = True
+logit = False
+usemass = True
+ovd = True
 #modpath = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad4-specres0p7_noz_poisson/module/1558550045/likelihood/'
 #modpath = '//home/chmodi/Projects/galmodel/code/modelsv2/n10/pad4-noz_poisson2/module/1558651873/likelihood/'
-modpath = '/home/chmodi/Projects/galmodel/notebooks/models/galmodel/pix3dcond/module/1561681515/likelihood/'
+#modpath = '/home/chmodi/Projects/galmodel/notebooks/models/galmodel/pix3dcond/module/1561681515/likelihood/'
+#modpath = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-pixinvcic-log/module/1561743877/likelihood/'
+#modpath = '//home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-pixcicinv/module/1562024537/likelihood/'
+modpath  = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-pixcicinvfmap8/module/1562441352/likelihood/'
+modpath = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-pixmcicd-invfmap8/module/1562597388/likelihood/'
+modpath = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-mcicd-inv/module/1562799664/likelihood/'
 
 resnorm = -3
-lr0 = 0.05
+lr0 = 0.01
 
-#suffix = 'nc%dnorm-pad4-specres0p7_noz_pois_lr0p1/'%(resnorm)
-suffix = 'nc%dnorm-pix3dcond_lr0p05/'%(resnorm)
+suffix = 'nc%dnorm-invmcicd_lr0p01/'%(resnorm)
+#suffix = 'nc%dnorm-pix3dinvmcicdf8d_lr0p01/'%(resnorm)
 if stdinit : suffix = suffix[:-1] + '-stdinit/'
 if truthinit : suffix = suffix[:-1] + '-truth/'
+if datainit : suffix = suffix[:-1] + '-datainit/'
 
 
 
@@ -102,12 +97,13 @@ if __name__=="__main__":
     ftype = 'L%04d_N%04d_S%04d_%02dstep/'
     ftypefpm = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
     #
-    maxiter = 1005
     gtol = 1e-8
     sigma = 1**0.5
     nprint, nsave = 20, 500
-    #R0s = [6, 4, 2, 1, 0]
-    R0s = [0]
+    R0s = [4, 2, 1, 0]
+    maxiter = 505
+    #R0s = [0]
+    #maxiter = 1005
     
     #output folder
     ofolder = './saved/L%04d_N%04d_S%04d_n%02d-v2/'%(bs, nc, seed, numd*1e4)
@@ -133,9 +129,23 @@ if __name__=="__main__":
     final = tools.readbigfile(dpath + ftype%(bs, nc, seed, step) + 'mesh/d/')
     print(final.shape)
     hposall = tools.readbigfile(dpath + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
+    massall = tools.readbigfile(dpath + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
+    massd = massall[:num].copy()
     hposd = hposall[:num].copy()
-    data = tools.paintnn(hposd, bs, nc)
+    #
+    if datacic:
+        datam = tools.paintcic(hposd, bs, nc, massd)
+        datap = tools.paintcic(hposd, bs, nc)
+    else:
+        datam = tools.paintnn(hposd, bs, nc, massd)
+        datap = tools.paintnn(hposd, bs, nc)
 
+    if usemass: data = datam
+    else: data = datap
+    if ovd: data = (data - data.mean())/data.mean()
+    
+    print(data.min(), data.max(), data.mean(), data.std())
+    
     truemeshes = [truth, final, data]
     np.save(ofolder + '/truth.f4', truth)
     np.save(ofolder + '/final.f4', final)
@@ -146,12 +156,12 @@ if __name__=="__main__":
     print('\nDo reconstruction\n')
 
     recong = rmods.graphhposft1smgrads(config, modpath, data, pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm,
-                                loss=loss, log=False)    
+                                       loss=loss, log=logit, inverse=inverse)    
     #
     
     initval = None
     initval = np.random.normal(0, 1, size=nc**3).reshape(nc, nc, nc).astype(config['dtype'])#truth
-    if stdinit : initval = standardinit(config, data, hposd, final, R=8)
+    if stdinit : initval = standardinit(config, datap, hposd, final, R=8)
     #initval = tools.readbigfile(dpath + ftype%(bs, nc, 900, step) + 'mesh/s/')
     #initval = np.ones((nc, nc, nc))
     if truthinit: initval = truth.copy()
@@ -179,8 +189,7 @@ if __name__=="__main__":
         gradandvars_chisq = g.get_collection_ref('grads')[0][0]
         gradandvars_prior = g.get_collection_ref('grads')[0][1]
 
-
-                                                                                       
+                                                                                      
 ##        optimizer = tf.train.GradientDescentOptimizer(learning_rate=lr)                
 ##        gradandvars_chisq = optimizer.compute_gradients(chisq, linmesh)                 
 ##        gradandvars_prior = optimizer.compute_gradients(prior, linmesh)
@@ -192,16 +201,19 @@ if __name__=="__main__":
             g1, v = gradandvars_chisq[i]
             g2, _ = gradandvars_prior[i]
 
-            gk = tfpf.r2c3d(g1, norm=nc**3)
-            smwts = tf.exp(tf.multiply(-0.5*kmesh**2, tf.multiply(Rsm*bs/nc, Rsm*bs/nc)))       
-            gk = tf.multiply(gk, tf.cast(smwts, tf.complex64))
-            g1 = tfpf.c2r3d(gk, norm=nc**3)
-
+            if len(R0s) > 1:
+                gk = tfpf.r2c3d(g1, norm=nc**3)
+                smwts = tf.exp(tf.multiply(-0.5*kmesh**2, tf.multiply(Rsm*bs/nc, Rsm*bs/nc)))       
+                gk = tf.multiply(gk, tf.cast(smwts, tf.complex64))
+                g1 = tfpf.c2r3d(gk, norm=nc**3)
+                
             gradandvars_new.append((g1+g2, v))
-
        
         applygrads = optimizer.apply_gradients(gradandvars_new)
 
+        if datainit:
+            initval = np.exp(session.run(samples, {Rsm:0}))
+        
         if initval is not None:
             print('Do init')
             initlinop = g.get_operation_by_name('initlin_op')
@@ -224,7 +236,7 @@ if __name__=="__main__":
             print('\nAnneal for Rsm = %0.2f\n'%R0)
             print('Output in ofolder = \n%s'%optfolder)
 
-            checkiter('init', optfolder, R0=R0)
+            #checkiter('init', optfolder, R0=R0)
             #
             for nit in range(maxiter):
                 #_ = session.run(applygrads, feed_dict={Rsm:R0, lr:0.1})

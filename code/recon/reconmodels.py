@@ -152,7 +152,7 @@ def graphinit(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=True, r
 
 
 
-def graphhposft1(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=True, resnorm=3, inference=False, loss='loglikelihood', sample='sample', log=False):
+def graphhposft1(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=True, resnorm=3,  loss='loglikelihood', sample='sample', log=False, inverse=False):
 
     bs, nc = config['boxsize'], config['nc']
     kmesh = sum(kk**2 for kk in config['kvec'])**0.5
@@ -181,12 +181,15 @@ def graphhposft1(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=True
         else:
             xx = tf.expand_dims(tf.expand_dims(final, 0), -1)
         #Halos
-        #if inference : xx = tf.log1p(xx)
         if log : xx = tf.log(tf.add(1.0, xx))
         yy = tf.expand_dims(tf.expand_dims(data, 0), -1)
         print('xx, yy shape :', xx.shape, yy.shape)
-        likelihood = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[loss]
-        samples = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[sample]
+        if inverse:
+            likelihood = module(dict(features=tf.cast(yy, tf.float32), labels=tf.cast(xx, tf.float32)), as_dict=True)[loss]
+            samples = module(dict(features=tf.cast(yy, tf.float32), labels=tf.cast(xx, tf.float32)), as_dict=True)[sample] # 
+        else:
+            likelihood = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[loss]
+            samples = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[sample]
         samples = tf.identity(samples, name='samples')
         print(likelihood.shape)
         
@@ -231,7 +234,7 @@ def graphhposft1(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=True
 
 
 
-
+from tensorflow.python.ops import gen_nn_ops
 def graphhposft1pool(config, modpath, data, pad, maxiter=100, gtol=1e-5, pool=1, resnorm=3, inference=False, loss='loglikelihood', sample='sample', log=False):
 
     bs, nc = config['boxsize'], config['nc']
@@ -274,6 +277,12 @@ def graphhposft1pool(config, modpath, data, pad, maxiter=100, gtol=1e-5, pool=1,
         
         print(likelihood)
         ##Anneal
+##        pooltensor = tf.placeholder(shape=(None, None, None), dtype=tf.float32, name='pool')
+##        poolshape = tf.shape(pooltensor)
+##        print(poolshape, type(poolshape))
+##        pshape = poolshape[0]
+##        conv_pooled = gen_nn_ops.avg_pool3d(tf.cast(xx, tf.float32), ksize=[1,1, pshape, 1],strides=[1, 1, 1, 1],padding='VALID',name="pool")
+##
         finalpool = tf.nn.avg_pool3d(tf.cast(xx, tf.float32), ksize=[1, dx, dx, dx, 1], strides=[1, dx, dx, dx, 1], padding='VALID')*tf.cast(dx**3, tf.float32)
         yypool = tf.nn.avg_pool3d(tf.cast(yy, tf.float32), ksize=[1, dx, dx, dx, 1], strides=[1, dx, dx,dx, 1], padding='VALID')*tf.cast(dx**3, tf.float32)
         locpool = tf.nn.avg_pool3d(loc, ksize=[1, dx, dx, dx, 1], strides=[1, dx, dx, dx, 1],
@@ -318,7 +327,124 @@ def graphhposft1pool(config, modpath, data, pad, maxiter=100, gtol=1e-5, pool=1,
 
 
 
-def graphhposft1smgrads(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=True, resnorm=3, inference=False, loss='loglikelihood', sample='sample', log=False):
+def graphhposft1poolmulti(config, modpath, data, pad, maxiter=100, gtol=1e-5, pool=1, resnorm=3, inference=False, loss='loglikelihood', sample='sample', log=False):
+
+    bs, nc = config['boxsize'], config['nc']
+    nc1, nc2, nc4 = nc, nc/2, nc/4
+    kmesh = sum(kk**2 for kk in config['kvec'])**0.5
+    priorwt = config['ipklin'](kmesh) * bs ** -3 
+    dx = pool
+    g = tf.Graph()
+    
+    with g.as_default():
+        
+        #dx = tf.placeholder(tf.int16, name='smoothing')
+        module = hub.Module(modpath)
+        initlin = tf.placeholder(tf.float32, (nc, nc, nc), name='initlin')
+        linear = tf.get_variable('linmesh', shape=(nc, nc, nc), 
+                             initializer=tf.random_normal_initializer(mean=1.0, stddev=0.5), trainable=True)
+        initlin_op = linear.assign(initlin, name='initlin_op')
+        #PM
+        icstate = tfpm.lptinit(linear, config, name='icstate')
+        fnstate = tfpm.nbody(icstate, config, verbose=False, name='fnstate')
+        final = tf.zeros_like(linear)
+        final = tfpf.cic_paint(final, fnstate[0], boxsize=bs, name='final')
+        
+        #
+        if pad:
+            xx = tf.concat((final[-pad:, :, :], final, final[:pad, :, :]), axis=0)
+            xx = tf.concat((xx[:, -pad:, :], xx, xx[:, :pad, :]), axis=1)
+            xx = tf.concat((xx[:, :, -pad:], xx, xx[:, :, :pad]), axis=2)
+            xx = tf.expand_dims(tf.expand_dims(xx, 0), -1)
+        else:
+            xx = tf.expand_dims(tf.expand_dims(final, 0), -1)
+        #Halos
+        #if inference : xx = tf.log1p(xx)
+        if log : xx = tf.log(tf.add(1.0, xx))
+        yy = tf.expand_dims(tf.expand_dims(data, 0), -1)
+
+        loc = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)['lambda']
+        likelihood = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[loss]
+        samples = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[sample]
+        samples = tf.identity(samples, name='samples')
+        
+        ##Anneal
+
+        dx = 2
+        yypool2 = tf.nn.avg_pool3d(tf.cast(yy, tf.float32), ksize=[1, dx, dx, dx, 1], strides=[1, dx, dx,dx, 1], padding='VALID')*tf.cast(dx**3, tf.float32)
+        locpool2 = tf.nn.avg_pool3d(loc, ksize=[1, dx, dx, dx, 1], strides=[1, dx, dx, dx, 1], padding='VALID')*tf.cast(dx**3, tf.float32)
+
+        dx = 4
+        yypool4 = tf.nn.avg_pool3d(tf.cast(yy, tf.float32), ksize=[1, dx, dx, dx, 1], strides=[1, dx, dx,dx, 1], padding='VALID')*tf.cast(dx**3, tf.float32)
+        locpool4 = tf.nn.avg_pool3d(loc, ksize=[1, dx, dx, dx, 1], strides=[1, dx, dx, dx, 1], padding='VALID')*tf.cast(dx**3, tf.float32)
+
+        
+        dist1 = tfd.Poisson(rate=loc)
+        samplepool1 = dist1.sample()
+        loglikepool1 = dist1.log_prob(tf.cast(yy, tf.float32))
+        residual1 = tf.reduce_sum(loglikepool1)
+
+        dist2 = tfd.Poisson(rate=locpool2)
+        samplepool2 = dist2.sample()
+        loglikepool2 = dist2.log_prob(yypool2)
+        residual2 = tf.reduce_sum(loglikepool2)
+
+        dist4 = tfd.Poisson(rate=locpool4)
+        samplepool4 = dist4.sample()
+        loglikepool4 = dist4.log_prob(yypool4)
+        residual4 = tf.reduce_sum(loglikepool4)
+
+        #residual = tf.reduce_sum(likelihood)
+
+        if loss == 'loglikelihood':
+            residual1 = tf.multiply(residual1, -1.)
+            residual2 = tf.multiply(residual2, -1.)
+            residual4 = tf.multiply(residual4, -1.)
+        chisq1 = tf.multiply(residual1, 1/nc1**resnorm, name='chisq1')
+        chisq2 = tf.multiply(residual2, 1/nc2**resnorm, name='chisq2')
+        chisq4 = tf.multiply(residual4, 1/nc4**resnorm, name='chisq4')
+        chisq = tf.identity(chisq1, name='chisq')
+
+        #Prior
+        lineark = tfpf.r2c3d(linear, norm=nc**3)
+        priormesh = tf.square(tf.cast(tf.abs(lineark), tf.float32))
+        prior = tf.reduce_sum(tf.multiply(priormesh, 1/priorwt))
+        prior = tf.multiply(prior, 1/nc**3, name='prior')
+        #
+
+        loss1 = tf.add(chisq1, prior, name='loss1')
+        loss2 = tf.add(chisq2, prior, name='loss2')
+        loss4 = tf.add(chisq4, prior, name='loss4')
+        loss = tf.identity(loss1, name='loss')
+        
+        lr = tf.placeholder(tf.float32, name='learning_rate')
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=lr)
+
+        grads_and_vars11 = optimizer.compute_gradients(chisq1, [linear])
+        grads_and_vars21 = optimizer.compute_gradients(prior, [linear])
+        grads_and_vars12 = optimizer.compute_gradients(chisq2, [linear])
+        grads_and_vars22 = optimizer.compute_gradients(prior, [linear])
+        grads_and_vars14 = optimizer.compute_gradients(chisq4, [linear])
+        grads_and_vars24 = optimizer.compute_gradients(prior, [linear])
+        #opt_op = optimizer.apply_gradients(grads_and_vars1, name='apply_grad')
+
+
+        
+        tf.add_to_collection('inits', [initlin_op, initlin])
+        tf.add_to_collection('opt', optimizer)
+        tf.add_to_collection('diagnostics', [prior, chisq, loss])
+        tf.add_to_collection('reconpm', [linear, final, fnstate, samples])
+        tf.add_to_collection('data', data)
+        tf.add_to_collection('grads', [grads_and_vars14, grads_and_vars24,
+                                       grads_and_vars12, grads_and_vars22,
+                                       grads_and_vars11, grads_and_vars21])
+    return g
+
+
+
+
+
+def graphhposft1smgrads(config, modpath, data, pad, maxiter=100, gtol=1e-5, anneal=True, resnorm=3, inference=False, loss='loglikelihood', sample='sample', log=False, inverse=False):
 
     bs, nc = config['boxsize'], config['nc']
     kmesh = sum(kk**2 for kk in config['kvec'])**0.5
@@ -336,7 +462,8 @@ def graphhposft1smgrads(config, modpath, data, pad, maxiter=100, gtol=1e-5, anne
         initlink = tfpf.r2c3d(initlin, norm=nc**3)
         smwts = tf.exp(tf.multiply(-0.5*kmesh**2, 10))       
         initlinsm = tfpf.c2r3d(tf.multiply(initlink, tf.cast(smwts, tf.complex64)), norm=nc**3)
-        initlin_op = linear.assign(initlinsm, name='initlin_op')
+        #initlin_op = linear.assign(initlinsm, name='initlin_op')
+        initlin_op = linear.assign(initlin, name='initlin_op')
         
         #PM
         icstate = tfpm.lptinit(linear, config, name='icstate')
@@ -353,11 +480,17 @@ def graphhposft1smgrads(config, modpath, data, pad, maxiter=100, gtol=1e-5, anne
             xx = tf.expand_dims(tf.expand_dims(final, 0), -1)
         #Halos
         #if inference : xx = tf.log1p(xx)
-        if log : xx = tf.log(tf.add(1.0, xx))
-        yy = tf.expand_dims(tf.expand_dims(data, 0), -1)
+        if log : xx = tf.log(tf.add(log, xx))
+        if len(data.shape) == 3: yy = tf.expand_dims(tf.expand_dims(data, 0), -1)
+        elif len(data.shape) == 4: yy = tf.expand_dims(data, 0)
         print('xx, yy shape :', xx.shape, yy.shape)
-        likelihood = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[loss]
-        samples = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[sample]
+
+        if inverse:
+            likelihood = module(dict(features=tf.cast(yy, tf.float32), labels=tf.cast(xx, tf.float32)), as_dict=True)[loss]
+            samples = module(dict(features=tf.cast(yy, tf.float32), labels=tf.cast(xx, tf.float32)), as_dict=True)[sample] # 
+        else:
+            likelihood = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[loss]
+            samples = module(dict(features=tf.cast(xx, tf.float32), labels=tf.cast(yy, tf.float32)), as_dict=True)[sample]
         samples = tf.identity(samples, name='samples')
         print(likelihood.shape)
         
@@ -365,7 +498,8 @@ def graphhposft1smgrads(config, modpath, data, pad, maxiter=100, gtol=1e-5, anne
         lineark = tfpf.r2c3d(linear, norm=nc**3)
         priormesh = tf.square(tf.cast(tf.abs(lineark), tf.float32))
         prior = tf.reduce_sum(tf.multiply(priormesh, 1/priorwt))
-        prior = tf.multiply(prior, 1/nc**3)
+        if resnorm >=0: prior = tf.multiply(prior, 1/nc**3)
+        else: pass
         prior = tf.identity(prior, name='prior')
         #
 
@@ -373,7 +507,8 @@ def graphhposft1smgrads(config, modpath, data, pad, maxiter=100, gtol=1e-5, anne
         if loss == 'loglikelihood':
             residual = tf.multiply(residual, -1.)
 
-        chisq = tf.multiply(residual, 1/nc**resnorm, name='chisq')
+        if resnorm >=0: chisq = tf.multiply(residual, 1/nc**resnorm, name='chisq')
+        else: chisq = tf.multiply(residual, 1., name='chisq')
 
         loss = tf.add(chisq, prior, name='loss')
 

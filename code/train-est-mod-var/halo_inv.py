@@ -6,7 +6,7 @@ sys.path.append('../utils/')
 import tools
 import datatools as dtools
 from time import time
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
  #
 import tensorflow as tf
 from tensorflow.contrib.slim import add_arg_scope
@@ -43,13 +43,14 @@ vseeds = [100, 300, 800, 900]
 
 #############################
 
-suff = 'pad0-inv2'
+suff = 'pad0-mcicd-inv'
 fudge = 1000
+log = False
 fname = open('../models/n10/README', 'a+', 1)
 fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
 fname.close()
 
-savepath = '../models/n10/%s/'%suff
+savepath = '../modelsv2/n10/%s/'%suff
 try : os.makedirs(savepath)
 except: pass
 
@@ -57,13 +58,13 @@ except: pass
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
 num_cubes= 500
-cube_sizes = np.array([16, 32, 64]).astype(int)
+cube_sizes = np.array([16, 32, 64, 128]).astype(int)
 nsizes = len(cube_sizes)
 pad = int(0)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = nc - cube_sizes
-ftname = ['cicovd']
-tgname = ['pcic']
+ftname = ['cic']
+tgname = ['mcicovd']
 nchannels = len(ftname)
 ntargets = len(tgname)
 
@@ -96,10 +97,16 @@ def get_meshes(seed, galaxies=False):
     massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
     hposd = hposall[:num].copy()
     massd = massall[:num].copy()
+    print(massd[-1]/1e10)
     hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
     hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
     hmesh['mnn'] = tools.paintnn(hposd, bs, nc, massd)
+    hmesh['mcic'] = tools.paintcic(hposd, bs, nc, massd)
+    hmesh['mcicovd'] = (hmesh['mcic'] - hmesh['mcic'].mean())/hmesh['mcic'].mean()
+    data = hmesh['mcicovd']
+    print(data.min(), data.max(), data.mean(), data.std())
 
+    
     return mesh, hmesh
 
 
@@ -163,7 +170,7 @@ class MDNEstimator(tf.estimator.Estimator):
         def _model_fn(features, labels, mode):
             return models._mdn_inv_model_fn(features, labels, 
                                  nchannels, n_y, n_mixture, dropout,
-                                        optimizer, mode, fudge=fudge)
+                                            optimizer, mode, fudge=fudge, log=log)
 
 
         super(self.__class__, self).__init__(model_fn=_model_fn,
@@ -315,9 +322,12 @@ def check_module(modpath):
 
 meshes, cube_features, cube_target = generate_training_data()
 for i in cube_features: print(i.min())
+for i in cube_target:
+    print('Target : ', i.min(), i.max(), i.mean(), i.std())
 vmeshes = {}
 for seed in vseeds: vmeshes[seed] = get_meshes(seed)
 
+sys.exit()
 # get TF logger
 log = logging.getLogger('tensorflow')
 log.setLevel(logging.DEBUG)
@@ -336,7 +346,8 @@ log.addHandler(fh)
 
 
 #for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000]:
-for max_steps in [50, 100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
+for max_steps in [50, 100, 500, 1000, 3000, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 60000, 70000]:
+#for max_steps in [50, 100]+list(np.arange(5e3, 7.1e4, 5e3, dtype=int)):
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)

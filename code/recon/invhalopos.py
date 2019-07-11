@@ -3,7 +3,7 @@
 import numpy as np
 import numpy
 import os, sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 from time import time
 import matplotlib.pyplot as plt
 
@@ -56,15 +56,19 @@ def loss_callback(var, literals, nprint=50, nsave=50, maxiter=500, t0=time()):
 
 anneal = True
 pad = 0
-inference = True
+inverse = True
+datacic = True
 #modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-inv3/module/1548750099/likelihood/'
 modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-inv3/module/1549940205/likelihood/'
 #modpath = '/home/chmodi/Projects/galmodel/code/models/n10/pad0-inv_nolog/module/1549961815//likelihood/'
-log = True
+modpath = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-pixinvcic-log/module/1561743877/likelihood/'
+modpath = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-pixcicinvfmap8/module/1562399115/likelihood/'
+modpath  = '/home/chmodi/Projects/galmodel/code/modelsv2/n10/pad0-pixcicinvfmap8/module/1562441352/likelihood/'
+log = False
 resnorm = 3
-stdinit = False
+stdinit = True
 #suffix = 'nc%dnorm-fpm/'%(resnorm)
-suffix = 'nc%dnorm-inv/'%(resnorm)
+suffix = 'nc%dnorm-pixinvcicf8d/'%(resnorm)
 if stdinit: suffix = suffix[:-1] + '_stdinit/'
 
 
@@ -80,14 +84,14 @@ if __name__=="__main__":
     dpath = './../../data/z00/'
     ftype = 'L%04d_N%04d_S%04d_%02dstep/'
     #
-    maxiter = 500
+    maxiter = 505
     gtol = 1e-8
     sigma = 1**0.5
     nprint, nsave = 20, 40
     R0s = [4, 2, 1, 0]
     
     #output folder
-    ofolder = './saved/L%04d_N%04d_S%04d_n%02d/'%(bs, nc, seed, numd*1e4)
+    ofolder = './saved/L%04d_N%04d_S%04d_n%02d-v2/'%(bs, nc, seed, numd*1e4)
     if anneal : ofolder += 'anneal%d/'%len(R0s)
     else: ofolder += '/noanneal/'
     ofolder = ofolder + suffix
@@ -96,6 +100,7 @@ if __name__=="__main__":
     print('Output in ofolder = \n%s'%ofolder)
     pkfile = '../flowpm/Planck15_a1p00.txt'
     config = Config(bs=bs, nc=nc, seed=seed, pkfile=pkfile)
+    #config = Config(bs=bs, nc=nc//2, seed=seed, pkfile=pkfile)
     fname = open(ofolder+'/README', 'w', 1)
     fname.write('Using module from path - %s n'%modpath)
     fname.close()
@@ -108,11 +113,19 @@ if __name__=="__main__":
     print(final.shape)
     hposall = tools.readbigfile(dpath + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
     hposd = hposall[:num].copy()
-    data = tools.paintnn(hposd, bs, nc)
+    #
+    if datacic:
+        data = tools.paintcic(hposd, bs, nc)
+    else:
+        data = tools.paintnn(hposd, bs, nc)
+        
+
+    #truth = truth[:64, :64, :64]
+    #final = final[:64, :64, :64]
+    #data = data[:64, :64, :64]
 
     #truemeshes = [truth, final, data]
     truemeshes = [truth, final, final]
-
     np.save(ofolder + '/truth.f4', truth)
     np.save(ofolder + '/final.f4', final)
     np.save(ofolder + '/data.f4', data)
@@ -121,7 +134,7 @@ if __name__=="__main__":
     #Do reconstruction here
     print('\nDo reconstruction\n')
 
-    recong = rmods.graphhposft1(config, modpath, data, pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm, inference=inference, log=log)    
+    recong = rmods.graphhposft1(config, modpath, data, pad,  maxiter=maxiter, gtol=gtol, anneal=anneal, resnorm=resnorm, log=log, inverse=inverse)    
     #
     
     initval = None

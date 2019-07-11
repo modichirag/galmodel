@@ -242,6 +242,30 @@ def guassdiff(pm, R1, R2):
     pass
 
 
+def diracdelta(i, j):
+    if i == j: return 1
+    else: return 0
+
+
+def shear(mesh, k):
+    '''Takes in a PMesh object in real space. Returns am array of shear'''          
+    k2 = sum([i ** 2 for i in k])
+    k2[0, 0, 0] = 1
+    meshc = np.fft.rfftn(mesh)/np.prod(mesh.shape)
+    s2 = np.zeros_like(mesh)
+
+    for i in range(3):
+        for j in range(i, 3):                                                       
+            basec = meshc.copy()
+            basec *= (k[i]*k[j] / k2 - diracdelta(i, j)/3.)              
+            baser = np.fft.irfftn(basec)*np.prod(mesh.shape)                                                                
+            s2[...] += baser**2                                                        
+            if i != j:                                                              
+                s2[...] += baser**2                                                
+    return s2  
+
+
+
 
 #################################################################################
 
@@ -251,7 +275,14 @@ def power(f1, f2=None, boxsize=1.0, k = None, symmetric=True):
     Calculate power spectrum given density field in real space & boxsize.
     Divide by mean, so mean should be non-zero
     """
-#    f1 = f1[::2, ::2, ::2]
+    if abs(f1.mean()) < 1e-3:
+        print('Add 1 to get nonzero mean of %0.3e'%f1.mean())
+        f1 = f1*1 + 1
+    if f2 is not None:
+        if abs(f2.mean()) < 1e-3:
+            print('Add 1 to get nonzero mean of %0.3e'%f2.mean())
+            f2 =f2*1 + 1
+    
     if symmetric: c1 = numpy.fft.rfftn(f1)
     else: c1 = numpy.fft.fftn(f1)
     c1 /= c1[0, 0, 0].real
