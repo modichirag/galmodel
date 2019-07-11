@@ -6,6 +6,34 @@ import numpy as np
 tfb = tfp.bijectors
 
 
+
+def dynamic_deconv_op3d(x, W, strides=[1,2,2,2,1], padding='SAME'):
+
+    filter_size = tf.shape(W)#list(map(int, W.get_shape()))
+    xs = tf.shape(x)
+    target_shape = tf.shape(x)
+    if padding == 'SAME': 
+        shapescaling = tf.constant([1, strides[1], strides[2], strides[3], 1])
+        target_shape = target_shape*shapescaling
+    if padding == 'VALID': 
+        shapescaling = tf.constant([1, strides[1], strides[2], strides[3], 1])
+        shapeoffset =  tf.constant([0, filter_size[0]-1, filter_size[1]-1, filter_size[2]-1, 1])
+        #This doesnt seem to be working. Figure out at some point
+        target_shape = target_shape*shapescaling
+        target_shape = target_shape+shapeoffset
+    return tf.nn.conv3d_transpose(x, W, target_shape, strides, padding)
+
+
+def dynamic_deconv3d(name, x, shape, strides=[1,2,2,2,1], activation=tf.nn.leaky_relu):
+    in_dim = x.get_shape()[-1]
+    W_shape = [shape[0], shape[1], shape[2], in_dim, shape[3]]
+    W = tf.get_variable(name+'_W', W_shape, tf.float32, tf.contrib.layers.xavier_initializer())
+    b = tf.get_variable(name+'_b', W_shape[3], tf.float32, tf.zeros_initializer)
+    conv = dynamic_deconv_op3d(x, W, strides=strides)
+    return activation(tf.add(conv, b))
+
+
+
 ###Following spectral normed conv3d has been contributed by Francois Lanusse
 
 NO_OPS = 'NO_OPS'

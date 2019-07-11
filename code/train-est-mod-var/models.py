@@ -20,7 +20,7 @@ import tensorflow.contrib.slim as slim
 from tensorflow.contrib.slim import add_arg_scope
 from layers import wide_resnet, wide_resnet_snorm, valid_resnet
 from layers import  wide_resnet_snorm
-from tfops import specnormconv3d
+from tfops import specnormconv3d, dynamic_deconv3d
 import tensorflow_hub as hub
 import tensorflow_probability
 import tensorflow_probability as tfp
@@ -48,6 +48,9 @@ def _mdn_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimize
             net = slim.conv3d(feature_layer, 16, 5, activation_fn=tf.nn.leaky_relu, padding='same')
         elif pad == 2:
             net = slim.conv3d(feature_layer, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
+        if pad == 4:
+            net = slim.conv3d(feature_layer, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
+            net = slim.conv3d(net, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
         #net = wide_resnet(feature_layer, 8, activation_fn=tf.nn.leaky_relu, is_training=is_training)
         net = wide_resnet(net, 16, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
         net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
@@ -180,15 +183,6 @@ def _mdn_specres_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, 
         subnet = tf.nn.leaky_relu(subnet)
         net = net + specnormconv3d(subnet,nfilter0, 3, name='l42', num_iters=num_iters, normwt=normwt)
         net = tf.nn.leaky_relu(net)
-##    net = wide_resnet_snorm(feature_layer, 1, depth_residual=2, activation_fn=tf.identity,
-##                                keep_prob=dropout, is_training=is_training, normwt=normwt)
-##        net = wide_resnet_snorm(net, 1, depth_residual=8, activation_fn=tf.nn.leaky_relu,
-##                                keep_prob=dropout, is_training=is_training, normwt=normwt)
-##        net = wide_resnet_snorm(net, 1, depth_residual=8, activation_fn=tf.nn.leaky_relu,
-##                                keep_prob=dropout, is_training=is_training, normwt=normwt)
-##        net = wide_resnet_snorm(net, 1, depth_residual=8, activation_fn=tf.nn.leaky_relu,
-##                                keep_prob=dropout, is_training=is_training, normwt=normwt)
-##
         # Define the probabilistic layer 
         net = specnormconv3d(net, n_mixture*3*n_y, 1)
         cube_size = tf.shape(obs_layer)[1]
@@ -1168,7 +1162,7 @@ def _mdn_inv_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, opti
         logits, loc, unconstrained_scale = tf.split(net, num_or_size_splits=3,
                                                     axis=-1)
         print('\nloc :\n', loc)
-        scale = tf.nn.softplus(unconstrained_scale[...]) 
+        scale = tf.nn.softplus(unconstrained_scale[...]) + 1e-3
         
         distribution = tfd.MixtureSameFamily(
             mixture_distribution=tfd.Categorical(logits=logits[...]),
@@ -2074,8 +2068,8 @@ def _mdn_specres_nozero_mask_poisson_model_fn(features, labels, nchannels, n_y, 
         #       
 
         # Builds the neural network       
-        #if nfilter0 == 2: net = tileft
-        if nfilter0 == 2: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
+        if nfilter0 == 2: net = tileft
+        #if nfilter0 == 2: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
         else: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
 
         # Builds the neural network
@@ -2083,21 +2077,19 @@ def _mdn_specres_nozero_mask_poisson_model_fn(features, labels, nchannels, n_y, 
         subnet = tf.nn.leaky_relu(subnet)
         subnet = specnormconv3d(subnet, nfilter0, 3, name='l12', num_iters=num_iters, normwt=normwt, padding='VALID')
         current_size = tf.shape(subnet)[1]
-        #net = net[:, 2:-2, 2:-2, 2:-2, :] + subnet
         short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
         net = short + subnet
         net = tf.nn.leaky_relu(net)
 
-        subnet = specnormconv3d(net, nfilter, 3, name='l21', num_iters=num_iters, normwt=normwt, padding='VALID')
-        subnet = tf.nn.leaky_relu(subnet)
-        subnet = specnormconv3d(subnet, nfilter0, 3, name='l22', num_iters=num_iters, normwt=normwt, padding='VALID')
-        #net = net[:, 2:-2, 2:-2, 2:-2, :] + subnet
-        current_size = tf.shape(subnet)[1]
-        short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
-        net = short + subnet
-        net = tf.nn.leaky_relu(net)
-        
-    
+        if pad == 4:
+            subnet = specnormconv3d(net, nfilter, 3, name='l21', num_iters=num_iters, normwt=normwt, padding='VALID')
+            subnet = tf.nn.leaky_relu(subnet)
+            subnet = specnormconv3d(subnet, nfilter0, 3, name='l22', num_iters=num_iters, normwt=normwt, padding='VALID')
+            current_size = tf.shape(subnet)[1]
+            short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+            net = short + subnet
+            net = tf.nn.leaky_relu(net)
+            
         
         # Define the probabilistic layer
         #if nfilter0 != 0: net = specnormconv3d(net, 1, 1, name='lfin', num_iters=num_iters, normwt=normwt)
@@ -2110,13 +2102,15 @@ def _mdn_specres_nozero_mask_poisson_model_fn(features, labels, nchannels, n_y, 
         print('masknet : ', masknet)
         
         #Predicted mask
-        #masknet = slim.conv3d(net, 8, 1, activation_fn=tf.nn.leaky_relu)
-        out_mask = specnormconv3d(masknet[...,0], 1, 1, name='mask', normwt=normwt)
+        #out_mask = specnormconv3d(masknet[...,0], 1, 1, name='mask', normwt=normwt)
+        #pred_mask = tf.squeeze(tf.nn.sigmoid(out_mask))
+        out_mask = tf.identity(masknet[...,0], name='mask')
         pred_mask = tf.squeeze(tf.nn.sigmoid(out_mask))
 
         #Distribution        
-        lbda = specnormconv3d(prednet[...,0], 1, 1, name='pred', normwt=normwt)
-        lbda = tf.nn.softplus(lbda, name='lambda') + 1e-5
+        #lbda = specnormconv3d(prednet[...,0], 1, 1, name='pred', normwt=normwt)
+        #lbda = tf.nn.softplus(lbda, name='lambda') + 1e-5
+        lbda = tf.nn.softplus(prednet[...,0], name='lambda') + 1e-5
         dist = tfd.Poisson(lbda)
         
         rawsample = tf.squeeze(dist.sample())
@@ -2190,136 +2184,705 @@ def _mdn_specres_nozero_mask_poisson_model_fn(features, labels, nchannels, n_y, 
 
 
 
-##
-##def _mdn_specres_nozero_mask_poisson_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad=4, lr0=1e-3, nfilter=32, nfilter0=2, normwt=0.7, num_iters=1):
-##
-##    # Check for training mode
-##    is_training = mode == tf.estimator.ModeKeys.TRAIN
-##        
-##    def _module_fn():
-##        """
-##        Function building the module
-##        """
-##    
-##
-##        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
-##        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
-##        mask_layer = tf.clip_by_value(obs_layer, 0, 1)
-##        batch_size = tf.shape(obs_layer)[0]
-##        cube_size = tf.shape(obs_layer)[1]
-##        #       
-##
-##        # Builds the neural network       
-##        if nfilter0 == 1: net = feature_layer
-##        else: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
-##
-##        # Builds the neural network
-##        subnet = specnormconv3d(net, nfilter, 3, name='l11', num_iters=num_iters, normwt=normwt, padding='VALID')
-##        subnet = tf.nn.leaky_relu(subnet)
-##        subnet = specnormconv3d(subnet, nfilter0, 3, name='l12', num_iters=num_iters, normwt=normwt, padding='VALID')
-##
-##        #net = net[:, 2:-2, 2:-2, 2:-2, :] + subnet
-##        short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, cube_size, cube_size,  cube_size, nfilter0])
-##        print('\n short subnet :\n', short, subnet)
-##        net = short + subnet
-##    #     net = tf.nn.dropout(net, 0.95)
-##        net = tf.nn.leaky_relu(net)
-##
-####        subnet = specnormconv3d(net, nfilter, 3, name='l21', num_iters=num_iters, normwt=normwt, padding='VALID')
-####        subnet = tf.nn.leaky_relu(subnet)
-####        subnet = specnormconv3d(subnet, nfilter0, 3, name='l22', num_iters=num_iters, normwt=normwt, padding='VALID')
-####        #net = net[:, 2:-2, 2:-2, 2:-2, :] + subnet
-####        net = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, cube_size , cube_size,  cube_size , 2]) + subnet
-####    #     net = tf.nn.dropout(net, 0.95)
-####        net = tf.nn.leaky_relu(net)
-####        
-##    
-##        
-##        # Define the probabilistic layer
-##        #if nfilter0 != 0: net = specnormconv3d(net, 1, 1, name='lfin', num_iters=num_iters, normwt=normwt)
-##
-##        print(net)
-##        net = tf.reshape(net, [-1, cube_size, cube_size, cube_size, n_y, 2])
-##        print('net : ', net)
-##        prednet, masknet = tf.split(net, num_or_size_splits=2, axis=-1)
-##        print('prednet : ', prednet)
-##        print('masknet : ', masknet)
-##        
-##        #Predicted mask
-##        #masknet = slim.conv3d(net, 8, 1, activation_fn=tf.nn.leaky_relu)
-##        out_mask = specnormconv3d(masknet[...,0], 1, 1, name='mask', normwt=normwt)
-##        pred_mask = tf.squeeze(tf.nn.sigmoid(out_mask))
-####
-##        #Distribution        
-##        lbda = specnormconv3d(prednet[...,0], 1, 1, name='pred', normwt=normwt)
-##        lbda = tf.nn.softplus(lbda, name='lambda') + 1e-5
-##        dist = tfd.Poisson(lbda)
-##        
-##        sample = tf.squeeze(dist.sample())
-##        #sample = rawsample*pred_mask
-##        loglik = dist.log_prob(obs_layer)
-##       
-##        # Define a function for sampling, and a function for estimating the log likelihood
-##
-##        #loss1 = - loglik* 0.5
-##        #loss2 =  - loglik* 0.5
-##        loss1 = - loglik* mask_layer 
-##        loss2 = tf.nn.sigmoid_cross_entropy_with_logits(logits=out_mask,
-##                                                labels=mask_layer)
-##        loss = loss1 + loss2
-##
-##        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
-##                          outputs={'sample':sample, 'loglikelihood':loglik,
-##                                   'rate':lbda,
-##                                   'rawsample':sample, 'pred_mask':lbda, 'out_mask':lbda,
-##                                   'loss':loss, 'loss1':loss1, 'loss2':loss2})
-##
-##
-##    # Create model and register module if necessary
-##    spec = hub.create_module_spec(_module_fn)
-##    module = hub.Module(spec, trainable=True)
-##    if isinstance(features,dict):
-##        predictions = module(features, as_dict=True)
-##    else:
-##        predictions = module({'features':features, 'labels':labels}, as_dict=True)
-##    
-##    if mode == tf.estimator.ModeKeys.PREDICT:    
-##        hub.register_module_for_export(module, "likelihood")
-##        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
-##    
-##    loss = predictions['loss']
-##    loss1, loss2 = tf.reduce_mean(predictions['loss1']), tf.reduce_mean(predictions['loss2'])
-##    # Compute and register loss function
-##    loss = tf.reduce_mean(loss)    
-##    tf.losses.add_loss(loss)
-##
-##    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
-##
-##    train_op = None
-##    eval_metric_ops = None
-##
-##    # Define optimizer
-##    if mode == tf.estimator.ModeKeys.TRAIN:
-##        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-##        with tf.control_dependencies(update_ops):
-##            global_step=tf.train.get_global_step()
-##            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
-##            values = [lr0, lr0/2, lr0/10, lr0/20, lr0/100, lr0/1000]
-##            #values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
-##            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
-##            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
-##            tf.summary.scalar('rate', learning_rate)
-##            logging_hook = tf.train.LoggingTensorHook({"iter":global_step, "loss" : loss, 
-##                "loss1" : loss1, "loss2" : loss2 }, every_n_iter=50)
-##
-##        tf.summary.scalar('loss', loss)
-##    elif mode == tf.estimator.ModeKeys.EVAL:
-##        
-##        eval_metric_ops = { "log_p": neg_log_likelihood}
-##
-##    return tf.estimator.EstimatorSpec(mode=mode,
-##                                      predictions=predictions,
-##                                      loss=total_loss,
-##                                      train_op=train_op,
-##                                      eval_metric_ops=eval_metric_ops, training_hooks = [logging_hook])
-##
+
+
+
+
+
+
+
+
+def _mdn_specres_nozero_mask_poisson_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad=4, lr0=1e-3, nfilter=32, nfilter0 = 2, normwt=0.7, num_iters=1):
+
+    # Check for training mode
+    is_training = mode == tf.estimator.ModeKeys.TRAIN
+        
+    def _module_fn():
+        """
+        Function building the module
+        """
+    
+
+        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
+        mask_layer = tf.clip_by_value(obs_layer, 0, 1)
+        batch_size = tf.shape(obs_layer)[0]
+        cube_size = tf.shape(obs_layer)[1]
+        tileft = tf.tile(feature_layer, [1, 1, 1, 1, 2])
+        #       
+
+        # Builds the neural network       
+        if nfilter0 == 2: net = tileft
+        #if nfilter0 == 2: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
+        else: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
+
+        # Builds the neural network
+        subnet = specnormconv3d(net, nfilter, 3, name='l11', num_iters=num_iters, normwt=normwt, padding='VALID')
+        subnet = tf.nn.leaky_relu(subnet)
+        subnet = specnormconv3d(subnet, nfilter0, 3, name='l12', num_iters=num_iters, normwt=normwt, padding='VALID')
+        current_size = tf.shape(subnet)[1]
+        short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+        net = short + subnet
+        net = tf.nn.leaky_relu(net)
+
+        if pad == 4:
+            subnet = specnormconv3d(net, nfilter, 3, name='l21', num_iters=num_iters, normwt=normwt, padding='VALID')
+            subnet = tf.nn.leaky_relu(subnet)
+            subnet = specnormconv3d(subnet, nfilter0, 3, name='l22', num_iters=num_iters, normwt=normwt, padding='VALID')
+            current_size = tf.shape(subnet)[1]
+            short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+            net = short + subnet
+            net = tf.nn.leaky_relu(net)
+            
+        
+        # Define the probabilistic layer
+        #if nfilter0 != 0: net = specnormconv3d(net, 1, 1, name='lfin', num_iters=num_iters, normwt=normwt)
+
+        print(net)
+        net = tf.reshape(net, [-1, cube_size, cube_size, cube_size, n_y, nfilter0])
+        print('net : ', net)
+        prednet, masknet = tf.split(net, num_or_size_splits=2, axis=-1)
+        print('prednet : ', prednet)
+        print('masknet : ', masknet)
+        
+        #Predicted mask
+        #out_mask = specnormconv3d(masknet[...,0], 1, 1, name='mask', normwt=normwt)
+        #pred_mask = tf.squeeze(tf.nn.sigmoid(out_mask))
+        out_mask = tf.identity(masknet[...,0], name='mask')
+        pred_mask = tf.squeeze(tf.nn.sigmoid(out_mask))
+
+        #Distribution        
+        #lbda = specnormconv3d(prednet[...,0], 1, 1, name='pred', normwt=normwt)
+        #lbda = tf.nn.softplus(lbda, name='lambda') + 1e-5
+        lbda = tf.nn.softplus(prednet[...,0], name='lambda') + 1e-5
+        dist = tfd.Poisson(lbda)
+        
+        rawsample = tf.squeeze(dist.sample())
+        sample = rawsample*pred_mask
+        loglik = dist.log_prob(obs_layer)
+       
+        # Define a function for sampling, and a function for estimating the log likelihood
+
+        loss1 = - loglik* mask_layer 
+        loss2 = tf.nn.sigmoid_cross_entropy_with_logits(logits=out_mask,
+                                                labels=mask_layer)
+        loss = loss1 + loss2
+
+        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
+                          outputs={'sample':sample, 'loglikelihood':loglik,
+                                   'rate':lbda,
+                                   'rawsample':rawsample, 'pred_mask':pred_mask, 'out_mask':out_mask,
+                                   'loss':loss, 'loss1':loss1, 'loss2':loss2})
+
+
+    # Create model and register module if necessary
+    spec = hub.create_module_spec(_module_fn)
+    module = hub.Module(spec, trainable=True)
+    if isinstance(features,dict):
+        predictions = module(features, as_dict=True)
+    else:
+        predictions = module({'features':features, 'labels':labels}, as_dict=True)
+    
+    if mode == tf.estimator.ModeKeys.PREDICT:    
+        hub.register_module_for_export(module, "likelihood")
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    
+    loss = predictions['loss']
+    loss1, loss2 = tf.reduce_mean(predictions['loss1']), tf.reduce_mean(predictions['loss2'])
+    # Compute and register loss function
+    loss = tf.reduce_mean(loss)    
+    tf.losses.add_loss(loss)
+
+    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+    train_op = None
+    eval_metric_ops = None
+
+    # Define optimizer
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            global_step=tf.train.get_global_step()
+            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
+            values = [lr0, lr0/2, lr0/10, lr0/20, lr0/100, lr0/1000]
+            #values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
+            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
+            tf.summary.scalar('rate', learning_rate)
+            logging_hook = tf.train.LoggingTensorHook({"iter":global_step, "loss" : loss, 
+                "loss1" : loss1, "loss2" : loss2 }, every_n_iter=50)
+
+        tf.summary.scalar('loss', loss)
+    elif mode == tf.estimator.ModeKeys.EVAL:
+        
+        eval_metric_ops = { "log_p": neg_log_likelihood}
+
+    return tf.estimator.EstimatorSpec(mode=mode,
+                                      predictions=predictions,
+                                      loss=total_loss,
+                                      train_op=train_op,
+                                      eval_metric_ops=eval_metric_ops, training_hooks = [logging_hook])
+
+
+
+
+
+
+
+
+
+
+def _mdn_specres_nozero_poisson_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad=4, lr0=1e-3, nfilter=32, nfilter0 = 1, normwt=0.7, num_iters=1):
+
+    # Check for training mode
+    is_training = mode == tf.estimator.ModeKeys.TRAIN
+        
+    def _module_fn():
+        """
+        Function building the module
+        """
+    
+        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
+        mask_layer = tf.clip_by_value(obs_layer, 0, 1)
+        batch_size = tf.shape(obs_layer)[0]
+        cube_size = tf.shape(obs_layer)[1]
+        #tileft = tf.tile(feature_layer, [1, 1, 1, 1, 2])
+        #       
+
+        # Builds the neural network       
+        #if nfilter0 == 2: net = tileft
+        #if nfilter0 == 2: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
+        #else:net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
+
+        # Builds the neural network
+        subnet = specnormconv3d(feature_layer, nfilter, 3, name='l11', num_iters=num_iters, normwt=normwt, padding='VALID')
+        subnet = tf.nn.leaky_relu(subnet)
+        subnet = specnormconv3d(subnet, nfilter0, 3, name='l12', num_iters=num_iters, normwt=normwt, padding='VALID')
+        current_size = tf.shape(subnet)[1]
+        short = tf.slice(feature_layer, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+        net = short + subnet
+        net = tf.nn.leaky_relu(net)
+
+        if pad == 4:
+            subnet = specnormconv3d(net, nfilter, 3, name='l21', num_iters=num_iters, normwt=normwt, padding='VALID')
+            subnet = tf.nn.leaky_relu(subnet)
+            subnet = specnormconv3d(subnet, nfilter0, 3, name='l22', num_iters=num_iters, normwt=normwt, padding='VALID')
+            current_size = tf.shape(subnet)[1]
+            short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+            net = short + subnet
+            net = tf.nn.leaky_relu(net)
+            
+
+        print(net)
+        lbda = tf.nn.softplus(net[...], name='lambda') + 1e-5
+        dist = tfd.Poisson(lbda)
+        
+        sample = tf.squeeze(dist.sample())
+        #sample = rawsample*pred_mask
+        loglik = dist.log_prob(obs_layer)
+       
+        # Define a function for sampling, and a function for estimating the log likelihood
+        loss = -loglik
+
+        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
+                          outputs={'sample':sample, 'loglikelihood':loglik,
+                                   'rate':lbda, 'loss':loss})
+
+
+    # Create model and register module if necessary
+    spec = hub.create_module_spec(_module_fn)
+    module = hub.Module(spec, trainable=True)
+    if isinstance(features,dict):
+        predictions = module(features, as_dict=True)
+    else:
+        predictions = module({'features':features, 'labels':labels}, as_dict=True)
+    
+    if mode == tf.estimator.ModeKeys.PREDICT:    
+        hub.register_module_for_export(module, "likelihood")
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    
+    loss = predictions['loss']
+    #loss1, loss2 = tf.reduce_mean(predictions['loss1']), tf.reduce_mean(predictions['loss2'])
+    # Compute and register loss function
+    loss = tf.reduce_mean(loss)    
+    tf.losses.add_loss(loss)
+
+    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+    train_op = None
+    eval_metric_ops = None
+
+    # Define optimizer
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            global_step=tf.train.get_global_step()
+            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
+            values = [lr0, lr0/2, lr0/10, lr0/20, lr0/100, lr0/1000]
+            #values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
+            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
+            tf.summary.scalar('rate', learning_rate)
+            logging_hook = tf.train.LoggingTensorHook({"iter":global_step, "loss" : loss }, every_n_iter=50)
+
+        tf.summary.scalar('loss', loss)
+    elif mode == tf.estimator.ModeKeys.EVAL:
+        
+        eval_metric_ops = { "log_p": neg_log_likelihood}
+
+    return tf.estimator.EstimatorSpec(mode=mode,
+                                      predictions=predictions,
+                                      loss=total_loss,
+                                      train_op=train_op,
+                                      eval_metric_ops=eval_metric_ops, training_hooks = [logging_hook])
+
+
+
+
+
+def _mdn_nozero_poisson_model_fn2(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad=4, lr0=1e-3, nfilter=32, nfilter0 = 1, normwt=0.7, num_iters=1):
+
+    # Check for training mode
+    is_training = mode == tf.estimator.ModeKeys.TRAIN
+        
+    def _module_fn():
+        """
+        Function building the module
+        """
+    
+        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
+        mask_layer = tf.clip_by_value(obs_layer, 0, 1)
+        batch_size = tf.shape(obs_layer)[0]
+        cube_size = tf.shape(obs_layer)[1]
+        #tileft = tf.tile(feature_layer, [1, 1, 1, 1, 2])
+        #       
+
+        # Builds the neural network       
+        #if nfilter0 == 2: net = tileft
+        #if nfilter0 == 2: net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
+        #else:net = specnormconv3d(feature_layer, nfilter0, 3, name='l00', num_iters=num_iters, normwt=normwt)
+
+        # Builds the neural network
+        subnet = specnormconv3d(feature_layer, nfilter, 3, name='l11', num_iters=num_iters, normwt=normwt, padding='VALID', spectral_normed=False)
+        subnet = tf.nn.leaky_relu(subnet)
+        subnet = specnormconv3d(subnet, nfilter0, 3, name='l12', num_iters=num_iters, normwt=normwt, padding='VALID', spectral_normed=False)
+        current_size = tf.shape(subnet)[1]
+        short = tf.slice(feature_layer, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+        net = short + subnet
+        net = tf.nn.leaky_relu(net)
+
+        if pad == 4:
+            subnet = specnormconv3d(net, nfilter, 3, name='l21', num_iters=num_iters, normwt=normwt, padding='VALID', spectral_normed=False)
+            subnet = tf.nn.leaky_relu(subnet)
+            subnet = specnormconv3d(subnet, nfilter0, 3, name='l22', num_iters=num_iters, normwt=normwt, padding='VALID', spectral_normed=False)
+            current_size = tf.shape(subnet)[1]
+            short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+            net = short + subnet
+            net = tf.nn.leaky_relu(net)
+            
+
+        print(net)
+        lbda = tf.nn.softplus(net[...], name='lambda') + 1e-5
+        dist = tfd.Poisson(lbda)
+        
+        sample = tf.squeeze(dist.sample())
+        #sample = rawsample*pred_mask
+        loglik = dist.log_prob(obs_layer)
+       
+        # Define a function for sampling, and a function for estimating the log likelihood
+        loss = -loglik
+
+        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
+                          outputs={'sample':sample, 'loglikelihood':loglik,
+                                   'rate':lbda, 'loss':loss})
+
+
+    # Create model and register module if necessary
+    spec = hub.create_module_spec(_module_fn)
+    module = hub.Module(spec, trainable=True)
+    if isinstance(features,dict):
+        predictions = module(features, as_dict=True)
+    else:
+        predictions = module({'features':features, 'labels':labels}, as_dict=True)
+    
+    if mode == tf.estimator.ModeKeys.PREDICT:    
+        hub.register_module_for_export(module, "likelihood")
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    
+    loss = predictions['loss']
+    #loss1, loss2 = tf.reduce_mean(predictions['loss1']), tf.reduce_mean(predictions['loss2'])
+    # Compute and register loss function
+    loss = tf.reduce_mean(loss)    
+    tf.losses.add_loss(loss)
+
+    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+    train_op = None
+    eval_metric_ops = None
+
+    # Define optimizer
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            global_step=tf.train.get_global_step()
+            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
+            values = [lr0, lr0/2, lr0/10, lr0/20, lr0/100, lr0/1000]
+            #values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
+            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
+            tf.summary.scalar('rate', learning_rate)
+            logging_hook = tf.train.LoggingTensorHook({"iter":global_step, "loss" : loss }, every_n_iter=50)
+
+        tf.summary.scalar('loss', loss)
+    elif mode == tf.estimator.ModeKeys.EVAL:
+        
+        eval_metric_ops = { "log_p": neg_log_likelihood}
+
+    return tf.estimator.EstimatorSpec(mode=mode,
+                                      predictions=predictions,
+                                      loss=total_loss,
+                                      train_op=train_op,
+                                      eval_metric_ops=eval_metric_ops, training_hooks = [logging_hook])
+
+
+
+
+
+
+def _mdn_nozero_poisson_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad=4, lr0=1e-3, nfilter=32, nfilter0 = 1):
+
+    # Check for training mode
+    is_training = mode == tf.estimator.ModeKeys.TRAIN
+        
+    def _module_fn():
+        """
+        Function building the module
+        """    
+        
+        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
+        mask_layer = tf.clip_by_value(obs_layer, 0, 1)
+        batch_size = tf.shape(obs_layer)[0]
+        cube_size = tf.shape(obs_layer)[1]
+        #tileft = tf.tile(feature_layer, [1, 1, 1, 1, 2])
+        #       
+
+        subnet = slim.conv3d(feature_layer, nfilter, 3, activation_fn=tf.nn.leaky_relu, padding='VALID')
+        #subnet = tf.nn.leaky_relu(subnet)
+        subnet = slim.conv3d(subnet, nfilter0, 3, activation_fn=None, padding='VALID')
+        current_size = tf.shape(subnet)[1]
+        short = tf.slice(feature_layer, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+        net = short + subnet
+        net = tf.nn.leaky_relu(net)
+
+        if pad == 4:
+            subnet = slim.conv3d(net, nfilter, 3, activation_fn=tf.nn.leaky_relu, padding='VALID')
+            subnet = tf.nn.leaky_relu(subnet)
+            subnet = slim.conv3d(subnet, nfilter0, 3, activation_fn=None, padding='VALID')
+            current_size = tf.shape(subnet)[1]
+            short = tf.slice(net, [0, 2, 2, 2, 0], [batch_size, current_size, current_size, current_size, nfilter0])
+            net = short + subnet
+            net = tf.nn.leaky_relu(net)
+            
+        
+        # Define the probabilistic layer
+        #if nfilter0 != 0: net = specnormconv3d(net, 1, 1, name='lfin', num_iters=num_iters, normwt=normwt)
+
+        print(net)
+        lbda = tf.nn.softplus(net[...], name='lambda') + 1e-5
+        dist = tfd.Poisson(lbda)
+        
+        sample = tf.squeeze(dist.sample())
+        #sample = rawsample*pred_mask
+        loglik = dist.log_prob(obs_layer)
+       
+        # Define a function for sampling, and a function for estimating the log likelihood
+        loss = -loglik
+
+        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
+                          outputs={'sample':sample, 'loglikelihood':loglik,
+                                   'rate':lbda, 'loss':loss})
+
+
+    # Create model and register module if necessary
+    spec = hub.create_module_spec(_module_fn)
+    module = hub.Module(spec, trainable=True)
+    if isinstance(features,dict):
+        predictions = module(features, as_dict=True)
+    else:
+        predictions = module({'features':features, 'labels':labels}, as_dict=True)
+    
+    if mode == tf.estimator.ModeKeys.PREDICT:    
+        hub.register_module_for_export(module, "likelihood")
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    
+    loss = predictions['loss']
+    #loss1, loss2 = tf.reduce_mean(predictions['loss1']), tf.reduce_mean(predictions['loss2'])
+    # Compute and register loss function
+    loss = tf.reduce_mean(loss)    
+    tf.losses.add_loss(loss)
+
+    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+    train_op = None
+    eval_metric_ops = None
+
+    # Define optimizer
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            global_step=tf.train.get_global_step()
+            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
+            values = [lr0, lr0/2, lr0/10, lr0/20, lr0/100, lr0/1000]
+            #values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
+            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
+            tf.summary.scalar('rate', learning_rate)
+            logging_hook = tf.train.LoggingTensorHook({"iter":global_step, "loss" : loss }, every_n_iter=50)
+
+        tf.summary.scalar('loss', loss)
+    elif mode == tf.estimator.ModeKeys.EVAL:
+        
+        eval_metric_ops = { "log_p": neg_log_likelihood}
+
+    return tf.estimator.EstimatorSpec(mode=mode,
+                                      predictions=predictions,
+                                      loss=total_loss,
+                                      train_op=train_op,
+                                      eval_metric_ops=eval_metric_ops, training_hooks = [logging_hook])
+
+
+
+
+
+
+
+
+### Model
+def _mdn_poisson_model_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad):
+
+    # Check for training mode
+    is_training = mode == tf.estimator.ModeKeys.TRAIN
+        
+    def _module_fn():
+        """
+        Function building the module
+        """
+    
+        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
+
+        # Builds the neural network
+        if pad == 0:
+            net = slim.conv3d(feature_layer, 16, 5, activation_fn=tf.nn.leaky_relu, padding='same')
+        elif pad == 2:
+            net = slim.conv3d(feature_layer, 16, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
+        #net = wide_resnet(feature_layer, 8, activation_fn=tf.nn.leaky_relu, is_training=is_training)
+        net = wide_resnet(net, 16, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
+        net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
+        net = wide_resnet(net, 32, activation_fn=tf.nn.leaky_relu, keep_prob=dropout, is_training=is_training)
+        net = slim.conv3d(net, 32, 3, activation_fn=tf.nn.leaky_relu)
+
+        # Define the probabilistic layer 
+        print(net)
+        lbda = tf.nn.softplus(net[...], name='lambda') + 1e-5
+        dist = tfd.Poisson(lbda)
+
+        # Define a function for sampling, and a function for estimating the log likelihood
+        #sample = tf.squeeze(mixture_dist.sample())
+        sample = dist.sample()
+        loglik = dist.log_prob(obs_layer)
+        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
+                          outputs={'sample':sample, 'loglikelihood':loglik,
+                                   'loc':loc, 'scale':scale, 'logits':logits})
+    
+
+    # Create model and register module if necessary
+    spec = hub.create_module_spec(_module_fn)
+    module = hub.Module(spec, trainable=True)
+    if isinstance(features,dict):
+        predictions = module(features, as_dict=True)
+    else:
+        predictions = module({'features':features, 'labels':labels}, as_dict=True)
+    
+    if mode == tf.estimator.ModeKeys.PREDICT:    
+        hub.register_module_for_export(module, "likelihood")
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    
+    loglik = predictions['loglikelihood']
+    # Compute and register loss function
+    neg_log_likelihood = -tf.reduce_sum(loglik, axis=-1)
+    neg_log_likelihood = tf.reduce_mean(neg_log_likelihood)
+    
+    tf.losses.add_loss(neg_log_likelihood)
+    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+    train_op = None
+    eval_metric_ops = None
+
+    # Define optimizer
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            global_step=tf.train.get_global_step()
+            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
+            values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
+            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
+            tf.summary.scalar('rate', learning_rate)                            
+        tf.summary.scalar('loss', neg_log_likelihood)
+    elif mode == tf.estimator.ModeKeys.EVAL:
+        
+        eval_metric_ops = { "log_p": neg_log_likelihood}
+
+    return tf.estimator.EstimatorSpec(mode=mode,
+                                      predictions=predictions,
+                                      loss=total_loss,
+                                      train_op=train_op,
+                                      eval_metric_ops=eval_metric_ops)
+
+
+
+
+### Model
+def _mdn_unetmodel_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad, fsize=8, nsub=2, distribution='logistic'):
+
+    # Check for training mode
+    is_training = mode == tf.estimator.ModeKeys.TRAIN
+        
+    def _module_fn():
+        """
+        Function building the module
+        """
+    
+        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
+
+        # Builds the neural network
+
+        if pad == 0:
+            d00 = slim.conv3d(feature_layer, fsize*2, 5, activation_fn=tf.nn.leaky_relu, padding='same')
+        elif pad == 2:
+            d00 = slim.conv3d(feature_layer, fsize*2, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
+        if pad == 4:
+            d00 = slim.conv3d(feature_layer, fsize*2, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
+            d00 = slim.conv3d(d00, fsize*2, 5, activation_fn=tf.nn.leaky_relu, padding='valid')
+        #downsample
+        dd = [[d00]]
+        for i in range(nsub):
+            d0 = dd[-1][-1]
+            d1 = wide_resnet(d0, fsize, activation_fn=tf.nn.leaky_relu)
+            d2 = wide_resnet(d1, fsize, activation_fn=tf.nn.leaky_relu)
+            dsub = slim.avg_pool3d(d2, kernel_size=3, stride=2, padding='SAME')
+            dd.append([d1, d2, dsub])
+
+        #lower layer
+        d0 = dd[-1][-1]
+        d1 = wide_resnet(d0, fsize, activation_fn=tf.nn.leaky_relu)
+        d2 = wide_resnet(d1, fsize, activation_fn=tf.nn.leaky_relu)
+
+        up = [[d1, d2]]
+        #upsample
+        for i in range(nsub):
+            usub = up[-1][-1]
+            dup = dd.pop()
+            u0 = dynamic_deconv3d('up%d'%i, usub, shape=[3,3,3,fsize], activation=tf.nn.leaky_relu)
+            #u0 = slim.conv3d_transpose(usub, fsize, kernel_size=3, stride=2)
+            u1 = wide_resnet(u0, fsize, activation_fn=tf.nn.leaky_relu)
+            u1c = tf.concat([u1, dup[1]], axis=-1)
+            u2 = wide_resnet(u1c, fsize, activation_fn=tf.nn.leaky_relu)
+            up.append([u0, u1, u1c, u2])
+
+        u0 = up[-1][-1]
+        net = slim.conv3d(u0, 1, 3, activation_fn=tf.nn.tanh)
+
+
+        # Define the probabilistic layer 
+        net = slim.conv3d(net, n_mixture*3*n_y, 1, activation_fn=None)
+        cube_size = tf.shape(obs_layer)[1]
+        net = tf.reshape(net, [-1, cube_size, cube_size, cube_size, n_y, n_mixture*3])
+#         net = tf.reshape(net, [None, None, None, None, n_y, n_mixture*3])
+        loc, unconstrained_scale, logits = tf.split(net,
+                                                    num_or_size_splits=3,
+                                                    axis=-1)
+        scale = tf.nn.softplus(unconstrained_scale) + 1e-3
+
+        # Form mixture of discretized logistic distributions. Note we shift the
+        # logistic distribution by -0.5. This lets the quantization capture "rounding"
+        # intervals, `(x-0.5, x+0.5]`, and not "ceiling" intervals, `(x-1, x]`.
+        if distribution == 'logistic':
+            discretized_logistic_dist = tfd.QuantizedDistribution(
+                distribution=tfd.TransformedDistribution(
+                    distribution=tfd.Logistic(loc=loc, scale=scale),
+                    bijector=tfb.AffineScalar(shift=-0.5)),
+                low=0.,
+                high=2.**3-1)
+
+            mixture_dist = tfd.MixtureSameFamily(
+                mixture_distribution=tfd.Categorical(logits=logits),
+                components_distribution=discretized_logistic_dist)
+
+        elif distribution == 'normal':
+
+            mixture_dist = tfd.MixtureSameFamily(
+                mixture_distribution=tfd.Categorical(logits=logits),
+                components_distribution=tfd.Normal(loc=loc, scale=scale))
+            
+            
+        # Define a function for sampling, and a function for estimating the log likelihood
+        #sample = tf.squeeze(mixture_dist.sample())
+        sample = mixture_dist.sample()
+        loglik = mixture_dist.log_prob(obs_layer)
+        hub.add_signature(inputs={'features':feature_layer, 'labels':obs_layer}, 
+                          outputs={'sample':sample, 'loglikelihood':loglik,
+                                   'loc':loc, 'scale':scale, 'logits':logits})
+    
+
+    # Create model and register module if necessary
+    spec = hub.create_module_spec(_module_fn)
+    module = hub.Module(spec, trainable=True)
+    if isinstance(features,dict):
+        predictions = module(features, as_dict=True)
+    else:
+        predictions = module({'features':features, 'labels':labels}, as_dict=True)
+    
+    if mode == tf.estimator.ModeKeys.PREDICT:    
+        hub.register_module_for_export(module, "likelihood")
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    
+    loglik = predictions['loglikelihood']
+    # Compute and register loss function
+    neg_log_likelihood = -tf.reduce_sum(loglik, axis=-1)
+    neg_log_likelihood = tf.reduce_mean(neg_log_likelihood)
+    
+    tf.losses.add_loss(neg_log_likelihood)
+    total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+    train_op = None
+    eval_metric_ops = None
+
+    # Define optimizer
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            global_step=tf.train.get_global_step()
+            boundaries = list(np.array([1e4, 2e4, 4e4, 5e4, 6e4]).astype(int))
+            values = [1e-3, 5e-4, 1e-4, 5e-5, 1e-5, 1e-6]
+            learning_rate = tf.train.piecewise_constant(global_step, boundaries, values)
+            train_op = optimizer(learning_rate=learning_rate).minimize(loss=total_loss, global_step=global_step)
+            tf.summary.scalar('rate', learning_rate)                            
+        tf.summary.scalar('loss', neg_log_likelihood)
+    elif mode == tf.estimator.ModeKeys.EVAL:
+        
+        eval_metric_ops = { "log_p": neg_log_likelihood}
+
+    return tf.estimator.EstimatorSpec(mode=mode,
+                                      predictions=predictions,
+                                      loss=total_loss,
+                                      train_op=train_op,
+                                      eval_metric_ops=eval_metric_ops)
+
+
+
