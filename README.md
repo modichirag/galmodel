@@ -1,7 +1,7 @@
 # galmodel
 
 Modeling halo and galaxy position and mass fields with deep networks, as well as reconstructing initial conditions with them.
-All architectures are implemented in 3D.
+All architectures are implemented with 3 spatial dimensions.
 
 - pixel CNN (with masked convolutions)
 - unet
