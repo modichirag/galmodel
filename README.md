@@ -1,7 +1,7 @@
 # galmodel
 
 Modeling halo and galaxy position and mass fields with deep networks, as well as reconstructing initial conditions with them.
-All architectures are implemented with 3 spatial dimensions.
+All architectures are mixture density networks and their variants to learn the likelihood of the data. Given the nature of our data, all networks are implemented with 3 spatial dimensions. 
 
 - pixel CNN (with masked convolutions)
 - unet
