@@ -79,6 +79,8 @@ class GatedCNN():
                  convconditional=None):
         self.fan_in = fan_in
         in_dim = self.fan_in.get_shape()[-1]
+        if convconditional is not None:
+            in_dim += convconditional.get_shape()[-1]
         self.W_shape = [W_shape[0], W_shape[1], W_shape[2], in_dim, W_shape[3]]  
         self.b_shape = W_shape[3]
 

@@ -7,7 +7,7 @@ import tools
 import datatools as dtools
 from time import time
 from pixelcnn3d import *
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
  #
 import tensorflow as tf
 from tensorflow.contrib.slim import add_arg_scope
@@ -48,12 +48,15 @@ R2 = 3*1.2
 kny = np.pi*nc/bs
 kk = tools.fftk((nc, nc, nc), bs)
 #seeds = [100]
-seeds = [100, 200, 300, 400]
+#vseeds = [100]
+seeds = [100, 200, 300, 400, 500, 600, 700]
 vseeds = [100, 300, 800, 900]
 
 #############################
 
-suff = 'pad0-pix'
+stellar = True
+distribution = 'normal'
+suff = 'pad0-pix-Scicnomean-map8-mix4'
 
 normwt = 0.7
 nfilter0 = 1
@@ -62,7 +65,7 @@ pad = int(0)
 #fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
 #fname.close()
 
-savepath = '../modelsv2/n10/%s/'%suff
+savepath = '../modelsv3/n10/%s/'%suff
 try : os.makedirs(savepath)
 except: pass
 
@@ -76,15 +79,19 @@ pad = int(0)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = nc - cube_sizes
 ftname = ['cic']
-tgname = ['pnn']
+tgname = ['mcicnomean']
 nchannels = len(ftname)
 ntargets = len(tgname)
-
+n_mixture = 4
 batch_size=32
 rprob = 0.5
 
-print('Features are ', ftname, file=fname)
-print('Pad with ', pad, file=fname)
+print('Features are : ', ftname, file=fname)
+print('Target are : ', tgname, file=fname)
+#print('Model Name : ', modelname, file=fname)
+print('Distribution : ', distribution, file=fname)
+print('No. of components : ', n_mixture, file=fname)
+print('Pad with : ', pad, file=fname)
 print('Rotation probability = %0.2f'%rprob, file=fname)
 fname.close()
 
@@ -108,11 +115,17 @@ def get_meshes(seed, galaxies=False, inverse=False):
     hmesh = {}
     hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
     massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
+    if stellar: massall = np.load(path + ftype%(bs, ncf, seed, stepf) + 'stellarmass.npy')
     hposd = hposall[:num].copy()
     massd = massall[:num].copy()
     hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
+    hmesh['pcicovd'] = (hmesh['pcic'] - hmesh['pcic'].mean())/hmesh['pcic'].mean()
+    hmesh['pcicovdR1'] = tools.fingauss(hmesh['pcicovd'], kk, R1, kny)
     hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
     hmesh['mnn'] = tools.paintnn(hposd, bs, nc, massd)
+    hmesh['mcic'] = tools.paintcic(hposd, bs, nc, massd)
+    hmesh['mcicovd'] = (hmesh['mcic'] - hmesh['mcic'].mean())/hmesh['mcic'].mean()
+    hmesh['mcicnomean'] = (hmesh['mcic'] )/hmesh['mcic'].mean()
 
     if inverse: return hmesh, mesh
     else: return mesh, hmesh
@@ -160,7 +173,7 @@ def generate_training_data():
 #############################
 
 def _mdn_pixmodel_fn(features, labels, nchannels, n_y, n_mixture, dropout, optimizer, mode, pad, 
-                    cfilter_size=None):
+                     cfilter_size=None, f_map=8):
 
     # Check for training mode                                                                                                   
     is_training = mode == tf.estimator.ModeKeys.TRAIN
@@ -170,37 +183,60 @@ def _mdn_pixmodel_fn(features, labels, nchannels, n_y, n_mixture, dropout, optim
         Function building the module                                                                                            
         """
 
+##        feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
+##        obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
+##
+##        conditional_im = wide_resnet(feature_layer, 16, activation_fn=tf.nn.leaky_relu, 
+##                                     keep_prob=dropout, is_training=is_training)
+###         conditional_im = wide_resnet(conditional_im, 1, activation_fn=tf.nn.leaky_relu, 
+###                                      keep_prob=dropout, is_training=is_training)
+##        inputnet = obs_layer
+##        
+###         fnet = wide_resnet(feature_layer, 16, activation_fn=tf.nn.leaky_relu, 
+###                                      keep_prob=dropout, is_training=is_training)
+###         fnet = wide_resnet(fnet, 1, activation_fn=tf.nn.leaky_relu, 
+###                                      keep_prob=dropout, is_training=is_training)
+##        
+###         inputnet = tf.concat((obs_layer, fnet), axis=-1)
+###         conditional_im = None
+##        # Builds the neural network                                                                                             
+##        stacks0 = PixelCNN3Dlayer(0, [inputnet], f_map=8, full_horizontal=True, h=None, 
+##                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
+##        stacks1 = PixelCNN3Dlayer(1, stacks0, f_map=8, full_horizontal=True, h=None, 
+##                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
+##        stacks2 = PixelCNN3Dlayer(2, stacks1, f_map=8, full_horizontal=True, h=None, 
+##                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
+##        stacks3 = PixelCNN3Dlayer(3, stacks2, f_map=8, full_horizontal=True, h=cfilter_size, 
+##                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
+##        stacks4 = PixelCNN3Dlayer(4, stacks3, f_map=8, full_horizontal=True, h=None, 
+##                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
+##        
+##        h_stack_in = stacks4[-1]
+###         print(h_stack_in)
+##        
         feature_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, nchannels], name='input')
         obs_layer = tf.placeholder(tf.float32, shape=[None, None, None, None, n_y], name='observations')
 
         conditional_im = wide_resnet(feature_layer, 16, activation_fn=tf.nn.leaky_relu, 
                                      keep_prob=dropout, is_training=is_training)
-#         conditional_im = wide_resnet(conditional_im, 1, activation_fn=tf.nn.leaky_relu, 
-#                                      keep_prob=dropout, is_training=is_training)
-        inputnet = obs_layer
-        
-#         fnet = wide_resnet(feature_layer, 16, activation_fn=tf.nn.leaky_relu, 
-#                                      keep_prob=dropout, is_training=is_training)
-#         fnet = wide_resnet(fnet, 1, activation_fn=tf.nn.leaky_relu, 
-#                                      keep_prob=dropout, is_training=is_training)
-        
-#         inputnet = tf.concat((obs_layer, fnet), axis=-1)
-#         conditional_im = None
+        conditional_im = wide_resnet(conditional_im, 16, activation_fn=tf.nn.leaky_relu, 
+                                      keep_prob=dropout, is_training=is_training)
+        #conditional_im = wide_resnet(conditional_im, 1, activation_fn=tf.nn.leaky_relu, 
+        #                              keep_prob=dropout, is_training=is_training)
+        conditional_im = tf.concat((feature_layer, conditional_im), -1)
+
         # Builds the neural network                                                                                             
-        stacks0 = PixelCNN3Dlayer(0, [inputnet], f_map=8, full_horizontal=True, h=None, 
-                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
-        stacks1 = PixelCNN3Dlayer(1, stacks0, f_map=8, full_horizontal=True, h=None, 
-                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
-        stacks2 = PixelCNN3Dlayer(2, stacks1, f_map=8, full_horizontal=True, h=None, 
-                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
-        stacks3 = PixelCNN3Dlayer(3, stacks2, f_map=8, full_horizontal=True, h=cfilter_size, 
-                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
-        stacks4 = PixelCNN3Dlayer(4, stacks3, f_map=8, full_horizontal=True, h=None, 
-                                 conditional_im=conditional_im, cfilter_size=cfilter_size)
-        
-        h_stack_in = stacks4[-1]
-#         print(h_stack_in)
-        
+        ul = [[obs_layer]]
+        for i in range(10):
+            #ul.append(PixelCNN3Dlayer(i, ul[i], f_map=f_map, full_horizontal=True, h=None, 
+            #                          conditional_im=conditional_im, cfilter_size=cfilter_size, gatedact='sigmoid'))
+            ul.append(PixelCNN3Dlayer(i, ul[i], f_map=f_map, full_horizontal=True, h=None, 
+                                      #conditional_im = conditional_im,
+                                      convconditional=conditional_im,
+                                      cfilter_size=cfilter_size, gatedact='sigmoid'))
+
+        h_stack_in = ul[-1][-1]
+
         with tf.variable_scope("fc_1"):
             fc1 = GatedCNN([1, 1, 1, 1], h_stack_in, orientation=None, gated=False, mask='b').output()
 
@@ -215,21 +251,28 @@ def _mdn_pixmodel_fn(features, labels, nchannels, n_y, n_mixture, dropout, optim
         loc, unconstrained_scale, logits = tf.split(net,
                                                     num_or_size_splits=3,
                                                     axis=-1)
-        scale = tf.nn.softplus(unconstrained_scale)
+        scale = tf.nn.softplus(unconstrained_scale) + 1e-3
 
         # Form mixture of discretized logistic distributions. Note we shift the                                                 
         # logistic distribution by -0.5. This lets the quantization capture "rounding"                                          
         # intervals, `(x-0.5, x+0.5]`, and not "ceiling" intervals, `(x-1, x]`.                                                 
-        discretized_logistic_dist = tfd.QuantizedDistribution(
-             distribution=tfd.TransformedDistribution(
-                 distribution=tfd.Logistic(loc=loc, scale=scale),
-                 bijector=tfb.AffineScalar(shift=-0.5)),
-             low=0.,
-             high=2.**3-1)
+        if distribution == 'logistic':
+            discretized_logistic_dist = tfd.QuantizedDistribution(
+                distribution=tfd.TransformedDistribution(
+                    distribution=tfd.Logistic(loc=loc, scale=scale),
+                    bijector=tfb.AffineScalar(shift=-0.5)),
+                low=0.,
+                high=2.**3-1)
 
-        mixture_dist = tfd.MixtureSameFamily(
-            mixture_distribution=tfd.Categorical(logits=logits),
-            components_distribution=discretized_logistic_dist)
+            mixture_dist = tfd.MixtureSameFamily(
+                mixture_distribution=tfd.Categorical(logits=logits),
+                components_distribution=discretized_logistic_dist)
+
+        elif distribution == 'normal':
+
+            mixture_dist = tfd.MixtureSameFamily(
+                mixture_distribution=tfd.Categorical(logits=logits),
+                components_distribution=tfd.Normal(loc=loc, scale=scale))
 
         # Define a function for sampling, and a function for estimating the log likelihood                                      
         #sample = tf.squeeze(mixture_dist.sample())                                                                             
@@ -505,12 +548,15 @@ def sampletrue(modpath, csize):
     plt.subplot(131)
     plt.imshow(yym[0,...,0].sum(axis=0), vmin=vmin, vmax=vmax)
     plt.colorbar()
+    plt.title('Data')
     plt.subplot(132)
     plt.imshow(sample[0,...,0].sum(axis=0), vmin=vmin, vmax=vmax)
     plt.colorbar()
+    plt.title('Correct sample')
     plt.subplot(133)
     plt.imshow(sample2[0,...,0].sum(axis=0), vmin=vmin, vmax=vmax)
     plt.colorbar()
+    plt.title('Single pass sample')
     plt.savefig(savepath + '/sampletrue_im%d'%max_steps)
 
     ##
@@ -577,7 +623,7 @@ for max_steps in [50, 100, 500, 1000, 3000, 5000, 10000, 15000, 20000, 30000, 40
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
 
-    model =  MDNEstimator(nchannels=nchannels, n_y=ntargets, n_mixture=8, dropout=0.95,
+    model =  MDNEstimator(nchannels=nchannels, n_y=ntargets, n_mixture=n_mixture, dropout=0.95,
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)

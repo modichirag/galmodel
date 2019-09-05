@@ -7,8 +7,8 @@ import tools
 import datatools as dtools
 from time import time
 from pixelcnn3d import *
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
- #
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
+#
 import tensorflow as tf
 from tensorflow.contrib.slim import add_arg_scope
 from layers import wide_resnet
@@ -43,26 +43,25 @@ ftype = 'L%04d_N%04d_S%04d_%02dstep/'
 ftypefpm = 'L%04d_N%04d_S%04d_%02dstep_fpm/'
 numd = 1e-3
 num = int(numd*bs**3)
-R1 = 10
+R1 = 3
 R2 = 3*1.2
 kny = np.pi*nc/bs
 kk = tools.fftk((nc, nc, nc), bs)
-#seeds = [100]
-seeds = [100, 200, 300, 400]
+seeds = [100]
+vseeds = [900]
+seeds = [100, 200, 300, 400, 500, 600, 700]
 vseeds = [100, 300, 800, 900]
 
 #############################
 
-suff = 'pad0-pixmcicd-invfmap8'
+stellar = True
+suff = 'pad0-pixScicnomean-invfmap8-mix4'
 
 normwt = 0.7
-nfilter0 = 1
 pad = int(0)
-#fname = open('../models/n10/README', 'a+', 1)
-#fname.write('%s \t :\n\tModel to predict halo position likelihood in halo_logistic with data supplemented by size=8, 16, 32, 64, 128; rotation with probability=0.5 and padding the mesh with 2 cells. Also reduce learning rate in piecewise constant manner. n_y=1 and high of quntized distribution to 3. Init field as 1 feature & high learning rate\n'%suff)
-#fname.close()
+n_mixture = 4
 
-savepath = '../modelsv2/n10/%s/'%suff
+savepath = '../modelsv3/n10/%s/'%suff
 try : os.makedirs(savepath)
 except: pass
 
@@ -70,14 +69,14 @@ except: pass
 fname = open(savepath + 'log', 'w+', 1)
 #fname = None
 num_cubes= 1000
-cube_sizes = np.array([16, 32]).astype(int)
+cube_sizes = np.array([16, 32, 64]).astype(int)
 nsizes = len(cube_sizes)
 pad = int(0)
 cube_sizesft = (cube_sizes + 2*pad).astype(int)
 max_offset = nc - cube_sizes
 #ftname = ['ciclog']
 #tgname = ['pcic']
-ftname = ['mcicovd']
+ftname = ['mcicnomean']
 tgname = ['cic']
 nchannels = len(ftname)
 ntargets = len(tgname)
@@ -85,8 +84,13 @@ ntargets = len(tgname)
 batch_size=64
 rprob = 0.5
 
-print('Features are ', ftname, file=fname)
-print('Pad with ', pad, file=fname)
+print('Features are : ', ftname, file=fname)
+print('Target are : ', tgname, file=fname)
+#print('Model Name : ', modelname, file=fname)
+#print('Distribution : ', distribution, file=fname)
+#print('Masktype : ', masktype, file=fname)
+print('No. of components : ', n_mixture, file=fname)
+print('Pad with : ', pad, file=fname)
 print('Rotation probability = %0.2f'%rprob, file=fname)
 fname.close()
 
@@ -100,7 +104,7 @@ def get_meshes(seed, galaxies=False, inverse=True):
     mesh['s'] = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'mesh/s/')
     partp = tools.readbigfile(path + ftypefpm%(bs, nc, seed, step) + 'dynamic/1/Position/')
     mesh['cic'] = tools.paintcic(partp, bs, nc)
-    mesh['ciclog'] = np.log(1e-4 + mesh['cic'])
+    mesh['ciclog'] = np.log(1e-3 + mesh['cic'])
     mesh['cicovd'] = mesh['cic']/mesh['cic'].mean()-1
     mesh['decic'] = tools.decic(mesh['cic'], kk, kny)
     mesh['R1'] = tools.fingauss(mesh['cic'], kk, R1, kny)
@@ -109,15 +113,23 @@ def get_meshes(seed, galaxies=False, inverse=True):
 
     hmesh = {}
     hposall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/PeakPosition/')[1:]    
-    massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
+    if stellar : massall = np.load(path + ftype%(bs, ncf, seed, stepf) + 'stellarmass.npy')
+    else: massall = tools.readbigfile(path + ftype%(bs, ncf, seed, stepf) + 'FOF/Mass/')[1:].reshape(-1)*1e10
+
     hposd = hposall[:num].copy()
     massd = massall[:num].copy()
+    print(massall.min()/1e10, massall.max()/1e10)    
+    print(massd.min()/1e10, massd.max()/1e10)    
+
     hmesh['pcic'] = tools.paintcic(hposd, bs, nc)
     hmesh['pnn'] = tools.paintnn(hposd, bs, nc)
     hmesh['mnn'] = tools.paintnn(hposd, bs, nc, massd)
     hmesh['mcic'] = tools.paintcic(hposd, bs, nc, massd)
+    hmesh['mcicnomean'] =  (hmesh['mcic'] )/hmesh['mcic'].mean()
     hmesh['mcicovd'] =  (hmesh['mcic'] - hmesh['mcic'].mean())/hmesh['mcic'].mean()
-
+    hmesh['pcicovd'] =  (hmesh['pcic'] - hmesh['pcic'].mean())/hmesh['pcic'].mean()
+    hmesh['pcicovdR3'] = tools.fingauss(hmesh['pcicovd'], kk, R1, kny)
+    
     if inverse: return hmesh, mesh
     else: return mesh, hmesh
 
@@ -188,8 +200,12 @@ def _mdn_pixmodel_fn(features, labels, nchannels, n_y, n_mixture, dropout, optim
         # Builds the neural network                                                                                             
         ul = [[obs_layer]]
         for i in range(10):
+            #ul.append(PixelCNN3Dlayer(i, ul[i], f_map=f_map, full_horizontal=True, h=None, 
+            #                          conditional_im=conditional_im, cfilter_size=cfilter_size, gatedact='sigmoid'))
             ul.append(PixelCNN3Dlayer(i, ul[i], f_map=f_map, full_horizontal=True, h=None, 
-                                      conditional_im=conditional_im, cfilter_size=cfilter_size, gatedact='sigmoid'))
+                                      #conditional_im = conditional_im,
+                                      convconditional=conditional_im,
+                                      cfilter_size=cfilter_size, gatedact='sigmoid'))
 
 
         h_stack_in = ul[-1][-1]
@@ -312,8 +328,8 @@ class MDNEstimator(tf.estimator.Estimator):
 def mapping_function(inds):
     def extract_batch(inds):
         
-        #isize = np.random.choice(len(cube_sizes), 1, replace=True)[0]
-        isize = np.random.choice(np.arange(1, len(cube_sizes)).astype('int'), 1, replace=True)[0]
+        isize = np.random.choice(len(cube_sizes), 1, replace=True)[0]
+        #isize = np.random.choice(np.arange(1, len(cube_sizes)).astype('int'), 1, replace=True)[0]
         batch = int(batch_size*8/cube_sizes[isize])
         if cube_sizes[isize]==nc : batch = 1
         inds = inds[:batch]
@@ -425,6 +441,7 @@ def check_module(modpath):
         axis.set_yticks(np.arange(0, 1.2, 0.1))
         axis.grid(which='both')
         axis.set_ylim(0.,1.1)
+    ax[0].set_ylim(0.,2)
     ax[0].set_ylabel('Transfer function', fontsize=14)
     ax[1].set_ylabel('Cross correlation', fontsize=14)
     #
@@ -452,10 +469,10 @@ def check_module(modpath):
     plt.show()
     
     dosampletrue = False
-    if max_steps in [50, 100, 500, 1000, 5000, 15000, 25000, 35000]:
+    if max_steps in [50, 100, 500, 1000, 5000, 15000, 25000, 35000, 45000, 55000]:
         dosampletrue = True
         csize = 16
-    if max_steps in [3000, 10000, 20000, 30000, 40000, 50000]:
+    if max_steps in [3000, 10000, 20000, 30000, 40000, 50000, 60000]:
         dosampletrue = True
         csize = 32
     if dosampletrue: sampletrue(modpath, csize)
@@ -500,14 +517,16 @@ def sampletrue(modpath, csize):
     plt.subplot(131)
     plt.imshow(yym[0,...,0].sum(axis=0), vmin=vmin, vmax=vmax)
     plt.colorbar()
+    plt.title('Data')
     plt.subplot(132)
     plt.imshow(sample[0,...,0].sum(axis=0), vmin=vmin, vmax=vmax)
     plt.colorbar()
+    plt.title('Correct sample')
     plt.subplot(133)
     plt.imshow(sample2[0,...,0].sum(axis=0), vmin=vmin, vmax=vmax)
     plt.colorbar()
+    plt.title('Single pass sample')
     plt.savefig(savepath + '/sampletrue_im%d'%max_steps)
-    plt.show()
 
     plt.figure()
     plt.hist(sample2.flatten(), range=(-5, 5), bins=100, label='predict', alpha=0.8)
@@ -575,12 +594,12 @@ log.addHandler(fh)
 
 
 #for max_steps in [50, 100, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 70000]:
-for max_steps in [50, 100, 500, 1000, 3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 60000, 70000]:
+for max_steps in [50, 100, 500, 1000, 3000, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000, 60000, 70000]:
     print('For max_steps = ', max_steps)
     tf.reset_default_graph()
     run_config = tf.estimator.RunConfig(save_checkpoints_steps = 2000)
 
-    model =  MDNEstimator(nchannels=nchannels, n_y=ntargets, n_mixture=8, dropout=0.95,
+    model =  MDNEstimator(nchannels=nchannels, n_y=ntargets, n_mixture=n_mixture, dropout=0.95,
                       model_dir=savepath + 'model', config = run_config)
 
     model.train(training_input_fn, max_steps=max_steps)

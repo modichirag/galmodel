@@ -12,8 +12,10 @@ def dynamic_deconv_op3d(x, W, strides=[1,2,2,2,1], padding='SAME'):
     filter_size = tf.shape(W)#list(map(int, W.get_shape()))
     xs = tf.shape(x)
     target_shape = tf.shape(x)
+    #channelscale = int(int(W.get_shape()[-1])/int(x.get_shape()[-1]))
     if padding == 'SAME': 
         shapescaling = tf.constant([1, strides[1], strides[2], strides[3], 1])
+        print(shapescaling)
         target_shape = target_shape*shapescaling
     if padding == 'VALID': 
         shapescaling = tf.constant([1, strides[1], strides[2], strides[3], 1])
