@@ -53,7 +53,7 @@ def lpt1(dlin_k, pos, config):
     """
     bs, nc = config['boxsize'], config['nc']    
     #ones = tf.ones_like(dlin_k)
-    lap = laplace(config)
+    lap = tf.cast(laplace(config), tf.complex64)
     
     displacement = tf.zeros_like(pos)
     displacement = []
