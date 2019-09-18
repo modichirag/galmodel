@@ -123,7 +123,7 @@ def lptz0(lineark, config, a=1, order=2):
 # NBODY
 
 
-def lptinit(linear, config, a0=None, order=2, name=None):
+def lptinit(linear, config, a0=None, order=2, name=None, lineark=None):
     """ Estimate the initial LPT displacement given an input linear (real) field """
     assert order in (1, 2)
 
@@ -134,7 +134,8 @@ def lptinit(linear, config, a0=None, order=2, name=None):
     if a0 is None: a0 = config['stages'][0]
     a = a0
 
-    lineark = r2c3d(linear, norm=nc**3)
+    if linear is not None: lineark = r2c3d(linear, norm=nc**3)
+    else: lineark = lineark
     pt = PerturbationGrowth(config['cosmology'], a=[a], a_normalize=1.0)
     DX = tf.multiply(dtype(pt.D1(a)) , lpt1(lineark, pos, config)) 
     P = tf.multiply(dtype(a ** 2 * pt.f1(a) * pt.E(a)) , DX)
