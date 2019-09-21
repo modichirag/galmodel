@@ -168,7 +168,7 @@ class ConvRNN3D(RNN):
       raise TypeError('Unrolling isn\'t possible with '
                       'convolutional RNNs.')
     if isinstance(cell, (list, tuple)):
-      # The StackedConvRNN2DCells isn't implemented yet.
+      # The StackedConvRNN3DCells isn't implemented yet.
       raise TypeError('It is not possible at the moment to'
                       'stack convolutional cells.')
     super(ConvRNN3D, self).__init__(cell,
