@@ -36,7 +36,6 @@ from tensorflow.python.keras.utils import conv_utils
 from tensorflow.python.keras.utils import generic_utils
 from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.ops import array_ops
-from tensorflow.python.util.tf_export import keras_export
 
 
 class ConvRNN3D(RNN):
