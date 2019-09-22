@@ -283,9 +283,9 @@ class ConvRNN3D(RNN):
     self.built = True
 
   def get_initial_state(self, inputs):
-    # (samples, timesteps, rows, cols, filters)
+    # (samples, timesteps, rows, cols, z, filters)
     initial_state = K.zeros_like(inputs)
-    # (samples, rows, cols, filters)
+    # (samples, rows, cols, z, filters)
     initial_state = K.sum(initial_state, axis=1)
     shape = list(self.cell.kernel_shape)
     shape[-1] = self.cell.filters
